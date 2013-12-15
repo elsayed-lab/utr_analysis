@@ -16,6 +16,7 @@ SL acceptor site.
 import os
 import sys
 import re
+import textwrap
 import argparse
 
 def main():
@@ -26,7 +27,27 @@ def parse_input():
     """
     Parses script input and returns values.
     """
-    parser = argparse.ArgumentParser(description='Spliced Leader Analysis')
+
+    # Usage example
+    usage_examples=textwrap.dedent("""\
+    Usage Example:
+    --------------
+    ./spliced_leader_analysis.py                                   \\
+        -i $RAW/tcruzir21/*/processed/*.filtered.fastq             \\
+        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
+        -f TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
+        -g TrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff             \\
+        -m 12 -n 3 output.csv
+    """)
+
+    # Create ArgumentParser instance
+    parser = argparse.ArgumentParser(
+        description='Spliced Leader Analysis',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=usage_examples
+    )
+
+    # Add arguments
     parser.add_argument('-i', '--input-reads',
                         help='RNA-Seq FASTQ glob string')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader', 
@@ -39,12 +60,10 @@ def parse_input():
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-n', '--num-mismatches', default=2,
                         help='Number of mismatches to allow (default=2)')
-    parser.add_argument('output', metavar='FILENAME',
+    parser.add_argument('output', metavar='OUTPUT FILENAME',
                         help='Filepath to write CSV output to.')
 
     return parser.parse_args()
-
-args = parser.parse_args()
 
 def readfq(fp):
     """
