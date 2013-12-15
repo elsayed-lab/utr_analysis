@@ -1,4 +1,4 @@
-SL analysis
+UTR analysis
 2013/12/12
 
 Overview
@@ -9,12 +9,16 @@ Overview
 - RNA-Seq reads (fastq)
 - Genome sequence (fasta)
 - Genome annotation including CDS coordinates (gff)
-- Spliced leader sequence
+- Spliced leader sequence (for 5'UTR/SL analysis)
 
-## Goal
+## Goals
+
+### Spliced leader analysis
 
 Generate a table containing the location of primary and alternative splice
 acceptor sites for each gene (and condition/sample); usage frequency for acceptor sites.
+
+### Poly-adenylation analysis
 
 ## Basic process
 

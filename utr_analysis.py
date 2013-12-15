@@ -1,17 +1,22 @@
 #!/bin/env python
 # -*- coding: utf-8 -*-
 """
-Spliced Leader Analysis
+Utranslated Region (UTR) analysis
 Keith Hughitt
 2013/12/15
 
-The purpose of this script is the scan a collection of RNA-Seq reads for an
-organism whose transcriptional machinery makes uses of trans-splicing and a
-spliced leader (SL), for example, Kinetoplastidae.
+The purpose of this script is the scan a collection of RNA-Seq reads and
+determine the location of the 5'UTR splice acceptor sites or 3'UTR
+poly-adenylation sites.
 
 A reference genome and CDS coordinates are required as input and will be used
 to map reads back after removing the spliced leader in order to determine the
 SL acceptor site.
+
+NOTE:
+
+Initially, development of this script will focus on SL site determination. Once
+this has been properly implemented, support for poly-A analysis will be added.
 """
 import os
 import sys
@@ -32,7 +37,7 @@ def parse_input():
     usage_examples=textwrap.dedent("""\
     Usage Example:
     --------------
-    ./spliced_leader_analysis.py                                   \\
+    ./utr_analysis.py                                              \\
         -i $RAW/tcruzir21/*/processed/*.filtered.fastq             \\
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
         -f TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
@@ -42,7 +47,7 @@ def parse_input():
 
     # Create ArgumentParser instance
     parser = argparse.ArgumentParser(
-        description='Spliced Leader Analysis',
+        description='Spliced Leader and poly-adenylation site analysis',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=usage_examples
     )
