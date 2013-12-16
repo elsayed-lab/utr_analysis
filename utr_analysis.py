@@ -1,4 +1,4 @@
-#!/bin/env python
+#!/bin/env python2
 # -*- coding: utf-8 -*-
 """
 Utranslated Region (UTR) analysis
@@ -39,7 +39,6 @@ def parse_input():
     """
     Parses script input and returns values.
     """
-
     # Usage example
     usage_examples=textwrap.dedent("""\
     Usage Example:
@@ -123,37 +122,28 @@ def readfq(fp):
                 yield name, seq, None # yield a fasta record instead
                 break
 
-def setup()
+def setup():
     """Create working directories, etc."""
-    subdirs = ['01-filtered-reads', '02-filtered-combined']
-    os.makedirs([os.path.join('build', x) for x in subdirs])
-    print("Creating build dir!")
+    subdirs = ['01-individual_filtered_reads', '02-combined_filtered_reads']
+    for d in [os.path.join('build', x) for x in subdirs]:
+        if not os.path.exists(d):
+            os.makedirs(d)
 
 """Main"""
 args = parse_input()
-setup()
-#matches = parse_reads(args)
+#setup()
 
 # save output to a file for now
 #with open(args.output, 'w') as fp:
 #    fp.writelines(matches)
 
 #@merge(args.input_reads, args.output, args.spliced_leader, args.min_length)
-@follows(setup)
-@merge(parse_reads, 'build/02-filtered-combined/matches.txt')
-def filter_reads(input_files, output_file):
-    """
-    Loads reads from fastq files, filters them, and combined output (for
-    now) into a single file.
-    """
-    # write output
-    with open(output_file, 'w') as outfile:
-        for x in input_files:
-            with open(x) as infile:
-                outfile.write(infile.read())
 
-@transform(args.input_reads, suffix('.fastq'), 
-           r'build/01-filtered/\1.filtered.txt', 
+#@transform(args.input_reads, suffix('.fastq'), 
+#           r'build/01-filtered/\1.filtered.txt', 
+@follows(setup)
+@transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
+           r'build/01-individual_filtered_reads/\3.txt', 
            args.spliced_leader, args.min_length)
 def parse_reads(infile, outfile, spliced_leader, min_length):
     """
@@ -187,6 +177,19 @@ def parse_reads(infile, outfile, spliced_leader, min_length):
     with open(outfile, 'w') as fp:
         fp.writelines(matches)
 
+@merge(parse_reads, 
+       'build/02-combined_filtered_reads/matching_reads_all_samples.txt')
+def filter_reads(input_files, output_file):
+    """
+    Loads reads from fastq files, filters them, and combined output (for
+    now) into a single file.
+    """
+    # write output
+    with open(output_file, 'w') as outfile:
+        for x in input_files:
+            with open(x) as infile:
+                outfile.write(infile.read())
+
 # run pipeline
-pipeline.run([filter_reads], verbose=True, multiprocess=12)
+pipeline_run([filter_reads], verbose=True, multiprocess=12)
 
