@@ -175,7 +175,7 @@ def parse_reads(infile, outfile, spliced_leader, min_length):
 
     # save matched reads to file
     with open(outfile, 'w') as fp:
-        fp.writelines(matches)
+        fp.write("\n".join(matches))
 
 @merge(parse_reads, 
        'build/02-combined_filtered_reads/matching_reads_all_samples.txt')
@@ -188,7 +188,7 @@ def filter_reads(input_files, output_file):
     with open(output_file, 'w') as outfile:
         for x in input_files:
             with open(x) as infile:
-                outfile.write(infile.read())
+                outfile.write(infile.read() + "\n")
 
 # run pipeline
 pipeline_run([filter_reads], verbose=True, multiprocess=12)
