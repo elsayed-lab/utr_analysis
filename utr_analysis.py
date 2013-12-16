@@ -21,7 +21,7 @@ this has been properly implemented, support for poly-A analysis will be added.
 Testing:
 
 utr_analysis.py \
-    -i $RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq \ 
+    -i "$RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq" \ 
     -f $REF/tcruzi_clbrener/genome/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
     -g $REF/tcruzi_clbrener/annotation/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff      \
     -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG output.csv
@@ -33,47 +33,7 @@ import re
 import glob
 import textwrap
 import argparse
-
-def main():
-    """Main"""
-    args = parse_input()
-    matches = parse_reads(args)
-
-    # save output to a file for now
-    with open(args.output, 'w') as fp:
-        fp.writelines(matches)
-
-def parse_reads(args):
-    """
-    Loads a collection of RNA-Seq reads and filters the reads so as to only
-    return those containing the feature of interest (SL or polyA tail).
-    """
-    matches = []
-
-    # limit to matches of size min_length or greater
-    s = spliced_leader[-args.min_length:]
-
-    # compile regex allowing a single mismatch;
-    # we will filter based on number of mistmatches again later on a larger
-    # portion of the read using the value specified at run-time
-    regex = re.compile('|'.join('^%s.%s' % (s[:i], s[i+1:]) for i in range(len(s))))
-
-    for filepath in glob.glob(args.input_reads):
-        # open fastq file
-        fastq = open(filepath)
-        print("Processing %s" % filepath)
-
-        # filter by length
-        for i, read in enumerate(readfq(fastq)):
-            seq = read[1][:len(args.spliced_leader)]
-
-            # check for match
-            if re.search(regex, seq) is not None:
-                matches.append([i, seq])
-
-    # filtered sequeneces
-    return matches
-
+from ruffus import *
 
 def parse_input():
     """
@@ -85,7 +45,7 @@ def parse_input():
     Usage Example:
     --------------
     ./utr_analysis.py                                              \\
-        -i $RAW/tcruzir21/*/processed/*.filtered.fastq             \\
+        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq"           \\
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
         -f TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
         -g TrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff             \\
@@ -163,5 +123,70 @@ def readfq(fp):
                 yield name, seq, None # yield a fasta record instead
                 break
 
-if __name__ == "__main__":
-    sys.exit(main())
+def setup()
+    """Create working directories, etc."""
+    subdirs = ['01-filtered-reads', '02-filtered-combined']
+    os.makedirs([os.path.join('build', x) for x in subdirs])
+    print("Creating build dir!")
+
+"""Main"""
+args = parse_input()
+setup()
+#matches = parse_reads(args)
+
+# save output to a file for now
+#with open(args.output, 'w') as fp:
+#    fp.writelines(matches)
+
+#@merge(args.input_reads, args.output, args.spliced_leader, args.min_length)
+@follows(setup)
+@merge(parse_reads, 'build/02-filtered-combined/matches.txt')
+def filter_reads(input_files, output_file):
+    """
+    Loads reads from fastq files, filters them, and combined output (for
+    now) into a single file.
+    """
+    # write output
+    with open(output_file, 'w') as outfile:
+        for x in input_files:
+            with open(x) as infile:
+                outfile.write(infile.read())
+
+@transform(args.input_reads, suffix('.fastq'), 
+           r'build/01-filtered/\1.filtered.txt', 
+           args.spliced_leader, args.min_length)
+def parse_reads(infile, outfile, spliced_leader, min_length):
+    """
+    Loads a collection of RNA-Seq reads and filters the reads so as to only
+    return those containing the feature of interest (SL or polyA tail).
+    """
+    matches = []
+
+    # limit to matches of size min_length or greater
+    s = spliced_leader[-min_length:]
+
+    # compile regex allowing a single mismatch;
+    # we will filter based on number of mistmatches again later on a larger
+    # portion of the read using the value specified at run-time
+    regex = re.compile('|'.join('^%s.%s' % (s[:i], s[i+1:])
+                           for i in range(len(s))))
+
+    # open fastq file
+    fastq = open(infile)
+    print("Processing %s" % os.path.basename(infile))
+
+    # filter by length
+    for i, read in enumerate(readfq(fastq)):
+        seq = read[1][:len(spliced_leader)]
+
+        # check for match
+        if re.search(regex, seq) is not None:
+            matches.append(seq)
+
+    # save matched reads to file
+    with open(outfile, 'w') as fp:
+        fp.writelines(matches)
+
+# run pipeline
+pipeline.run([filter_reads], verbose=True, multiprocess=12)
+
