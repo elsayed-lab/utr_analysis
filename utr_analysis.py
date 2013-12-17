@@ -5,6 +5,8 @@ Utranslated Region (UTR) analysis
 Keith Hughitt
 2013/12/15
 
+Overview
+--------
 The purpose of this script is the scan a collection of RNA-Seq reads and
 determine the location of the 5'UTR splice acceptor sites or 3'UTR
 poly-adenylation sites.
@@ -13,24 +15,25 @@ A reference genome and CDS coordinates are required as input and will be used
 to map reads back after removing the spliced leader in order to determine the
 SL acceptor site.
 
-NOTE:
-
+NOTE
+----
 Initially, development of this script will focus on SL site determination. Once
 this has been properly implemented, support for poly-A analysis will be added.
 
-Testing:
+Testing
+-------
 
 utr_analysis.py \
     -i "$RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq" \ 
     -f $REF/tcruzi_clbrener/genome/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
     -g $REF/tcruzi_clbrener/annotation/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff      \
     -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG output.csv
-
 """
 import os
 import sys
 import re
 import glob
+import datetime
 import textwrap
 import argparse
 from ruffus import *
@@ -122,6 +125,40 @@ def readfq(fp):
                 yield name, seq, None # yield a fasta record instead
                 break
 
+def create_header_comment(filename, description, author=None, email=""):
+    """
+    Creates a header comment to be appended at the top of the output files
+    generated at various stages in the pipeline.
+    """
+    template=textwrap.dedent("""
+    #
+    # File: %s
+    # Author: %s
+    # Email: %s
+    # Date: %s UT
+    # Description: %s
+    #
+    # Command used to generate file:
+    #
+    # %s
+    #
+    """)
+
+    # set defaults for author if none is specified
+    if author is None:
+        author = os.getlogin()
+
+    return template % (filename, author, email, datetime.datetime.utcnow(),
+                       description, " ".join(sys.argv))
+
+#--------------------------------------
+# Main
+#--------------------------------------
+args = parse_input()
+
+#--------------------------------------
+# Ruffus tasks 
+#--------------------------------------
 def setup():
     """Create working directories, etc."""
     subdirs = ['01-individual_filtered_reads', '02-combined_filtered_reads']
@@ -129,18 +166,6 @@ def setup():
         if not os.path.exists(d):
             os.makedirs(d)
 
-"""Main"""
-args = parse_input()
-#setup()
-
-# save output to a file for now
-#with open(args.output, 'w') as fp:
-#    fp.writelines(matches)
-
-#@merge(args.input_reads, args.output, args.spliced_leader, args.min_length)
-
-#@transform(args.input_reads, suffix('.fastq'), 
-#           r'build/01-filtered/\1.filtered.txt', 
 @follows(setup)
 @transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
            r'build/01-individual_filtered_reads/\3.txt', 
@@ -158,7 +183,7 @@ def parse_reads(infile, outfile, spliced_leader, min_length):
     # compile regex allowing a single mismatch;
     # we will filter based on number of mistmatches again later on a larger
     # portion of the read using the value specified at run-time
-    regex = re.compile('|'.join('^%s.%s' % (s[:i], s[i+1:])
+    regex = re.compile('|'.join('%s.%s' % (s[:i], s[i+1:])
                            for i in range(len(s))))
 
     # open fastq file

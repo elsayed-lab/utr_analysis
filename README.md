@@ -55,3 +55,9 @@ http://www.ncbi.nlm.nih.gov/nucleotide/20977244?report=genbank&log$=nuclalign&bl
 
 > AACTAACGCT ATATAAGTAT CAGTTTCTGT ACTTTATTG
 
+References
+----------
+- Agabian, N. (1990). Trans splicing of nuclear pre-mRNAs. Cell, 61(7),
+1157–1160. doi:10.1016/0092-8674(90)90674-4
+
+
