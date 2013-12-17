@@ -74,6 +74,10 @@ def parse_input():
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-n', '--num-mismatches', default=2, type=int,
                         help='Number of mismatches to allow (default=2)')
+    parser.add_argument('-a', '--author', help='Author contact name', 
+                        default='')
+    parser.add_argument('-e', '--email', help='Author contact email address',
+                        default='')
     parser.add_argument('output', metavar='OUTPUT FILENAME',
                         help='Filepath to write CSV output to.')
 
@@ -85,6 +89,10 @@ def parse_input():
     args.input_reads = os.path.expandvars(args.input_reads)
     args.gff = os.path.expandvars(args.gff)
     args.output = os.path.expandvars(args.output)
+
+    # set defaults for author if none is specified
+    if args.author is "":
+        args.author = os.getlogin()
 
     # @TODO Validate input
 
@@ -125,7 +133,7 @@ def readfq(fp):
                 yield name, seq, None # yield a fasta record instead
                 break
 
-def create_header_comment(filename, description, author=None, email=""):
+def create_header_comment(filename, description, author, email):
     """
     Creates a header comment to be appended at the top of the output files
     generated at various stages in the pipeline.
@@ -136,20 +144,23 @@ def create_header_comment(filename, description, author=None, email=""):
     # Author: %s
     # Email: %s
     # Date: %s UT
-    # Description: %s
+    # %s
     #
     # Command used to generate file:
-    #
     # %s
     #
     """)
+    # format description
+    desc_raw = " ".join(["Description:"] + description.split())
+    desc_processed = "\n# ".join(textwrap.wrap(desc_raw, 77))
 
-    # set defaults for author if none is specified
-    if author is None:
-        author = os.getlogin()
+    # format command
+    command_parts = textwrap.wrap(" ".join(sys.argv), 77)
+    command_parts = [x.ljust(79) + "\\" for x in command_parts]
+    command = "\n# ".join(["\n#"] + command_parts)
 
     return template % (filename, author, email, datetime.datetime.utcnow(),
-                       description, " ".join(sys.argv))
+                       desc_processed, command)
 
 #--------------------------------------
 # Main
@@ -211,6 +222,21 @@ def filter_reads(input_files, output_file):
     """
     # write output
     with open(output_file, 'w') as outfile:
+        # add header comment
+        header_comment = create_header_comment(
+            os.path.basename(output_file),
+            """A collection of trimmed and filtered RNA-Seq reads containing at 
+             least some portion of the UTR feature of interest in the correct 
+             position. This file contains the combined results from all samples
+             included in the analysis.""",
+            args.author,
+            args.email
+        )
+        outfile.write(header_comment)
+
+        # add header fields
+        outfile.write("id, sequence\n")
+
         for x in input_files:
             with open(x) as infile:
                 outfile.write(infile.read() + "\n")
