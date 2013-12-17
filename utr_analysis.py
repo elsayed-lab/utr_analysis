@@ -139,24 +139,28 @@ def create_header_comment(filename, description, author, email):
     generated at various stages in the pipeline.
     """
     template=textwrap.dedent("""
-    #
-    # File: %s
+    ###########################################################
+    # File:   %s
     # Author: %s
-    # Email: %s
-    # Date: %s UT
+    # Email:  %s
+    # Date:   %s UT
+    #
+    # Description:
+    #
     # %s
     #
-    # Command used to generate file:
-    # %s
+    # Command used to generate file:%s
     #
-    """)
+    ###########################################################
+    """).lstrip()
+
     # format description
-    desc_raw = " ".join(["Description:"] + description.split())
-    desc_processed = "\n# ".join(textwrap.wrap(desc_raw, 77))
+    desc_raw = " ".join(description.split())
+    desc_processed = "\n# ".join(textwrap.wrap(desc_raw, 78))
 
     # format command
-    command_parts = textwrap.wrap(" ".join(sys.argv), 77)
-    command_parts = [x.ljust(79) + "\\" for x in command_parts]
+    command_parts = textwrap.wrap(" ".join(sys.argv), 75)
+    command_parts = [x.ljust(75) + " \\" for x in command_parts]
     command = "\n# ".join(["\n#"] + command_parts)
 
     return template % (filename, author, email, datetime.datetime.utcnow(),
@@ -175,7 +179,7 @@ def setup():
     subdirs = ['01-individual_filtered_reads', '02-combined_filtered_reads']
     for d in [os.path.join('build', x) for x in subdirs]:
         if not os.path.exists(d):
-            os.makedirs(d)
+            os.makedirs(d, mode=0755)
 
 @follows(setup)
 @transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
