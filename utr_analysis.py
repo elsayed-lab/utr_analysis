@@ -31,6 +31,7 @@ utr_analysis.py \
 """
 import os
 import sys
+import csv
 import re
 import glob
 import datetime
@@ -179,13 +180,13 @@ def setup():
     subdirs = ['01-individual_filtered_reads', '02-combined_filtered_reads']
     for d in [os.path.join('build', x) for x in subdirs]:
         if not os.path.exists(d):
-            os.makedirs(d, mode=0755)
+            os.makedirs(d, mode=0o755)
 
 @follows(setup)
 @transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
-           r'build/01-individual_filtered_reads/\3.txt', 
+           r'build/01-individual_filtered_reads/\3.csv', 
            args.spliced_leader, args.min_length)
-def parse_reads(infile, outfile, spliced_leader, min_length):
+def parse_reads(input_file, output_file, spliced_leader, min_length):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing the feature of interest (SL or polyA tail).
@@ -202,30 +203,45 @@ def parse_reads(infile, outfile, spliced_leader, min_length):
                            for i in range(len(s))))
 
     # open fastq file
-    fastq = open(infile)
-    print("Processing %s" % os.path.basename(infile))
+    fastq = open(input_file)
+    print("Processing %s" % os.path.basename(input_file))
 
     # filter by length
     for i, read in enumerate(readfq(fastq)):
         seq = read[1][:len(spliced_leader)]
 
         # check for match
-        if re.search(regex, seq) is not None:
-            matches.append(seq)
+        match = re.search(regex, seq)
+        if match is not None:
+            # id, sequence, start, stop
+            matches.append([read[0], seq, match.start(), match.end()])
 
     # save matched reads to file
-    with open(outfile, 'w') as fp:
-        fp.write("\n".join(matches))
+    with open(output_file, 'w') as fp:
+        # add header comment
+        header_comment = create_header_comment(
+            os.path.basename(output_file),
+            """RNA-Seq reads containing at least %d bases of the UTR feature
+            of interested, allowing up to 1 mismatch.""" % min_length,
+            args.author,
+            args.email
+        )
+        fp.write(header_comment)
+
+        # write header row
+        writer = csv.writer(fp)
+        writer.writerow(['id', 'seq', 'start', 'end'])
+        writer.writerows(matches)
 
 @merge(parse_reads, 
-       'build/02-combined_filtered_reads/matching_reads_all_samples.txt')
+       'build/02-combined_filtered_reads/matching_reads_all_samples.csv')
 def filter_reads(input_files, output_file):
     """
     Loads reads from fastq files, filters them, and combined output (for
     now) into a single file.
     """
     # write output
-    with open(output_file, 'w') as outfile:
+    with open(output_file, 'w') as fp:
         # add header comment
         header_comment = create_header_comment(
             os.path.basename(output_file),
@@ -236,15 +252,20 @@ def filter_reads(input_files, output_file):
             args.author,
             args.email
         )
-        outfile.write(header_comment)
+        fp.write(header_comment)
 
         # add header fields
-        outfile.write("id, sequence\n")
+        fp.write("id, sequence, start, end\n")
 
         for x in input_files:
             with open(x) as infile:
-                outfile.write(infile.read() + "\n")
+                # skip over commments and field names
+                while infile.readline().startswith("#"):
+                    continue
+                # write rest of file contents
+                fp.write(infile.read() + "\n")
 
 # run pipeline
-pipeline_run([filter_reads], verbose=True, multiprocess=12)
+if __name__ == "__main__":
+    pipeline_run([filter_reads], verbose=True, multiprocess=12)
 
