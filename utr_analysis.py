@@ -37,6 +37,7 @@ import glob
 import datetime
 import textwrap
 import argparse
+import jellyfish
 from ruffus import *
 
 def parse_input():
@@ -177,8 +178,8 @@ args = parse_input()
 #--------------------------------------
 def setup():
     """Create working directories, etc."""
-    subdirs = ['01-individual_filtered_reads', '02-combined_filtered_reads']
-    for d in [os.path.join('build', x) for x in subdirs]:
+    directories = ['01-individual_filtered_reads', '02-combined_filtered_reads']
+    for d in [os.path.join('build', x) for x in directories]:
         if not os.path.exists(d):
             os.makedirs(d, mode=0o755)
 
@@ -193,6 +194,12 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     """
     matches = []
 
+    # Testing 2013/12/18
+    # For now, let's also keep the reads which match a part of the SL, but
+    # contain a larger number of mismatches. Once it has been verified that
+    # there is nothing interesting here, these can probably just be ignored
+    mismatches = [] 
+
     # limit to matches of size min_length or greater
     s = spliced_leader[-min_length:]
 
@@ -206,15 +213,45 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     fastq = open(input_file)
     print("Processing %s" % os.path.basename(input_file))
 
-    # filter by length
+    # find all reads containing at least `min_length` bases of the feature
+    # of interested
     for i, read in enumerate(readfq(fastq)):
         seq = read[1][:len(spliced_leader)]
 
         # check for match
         match = re.search(regex, seq)
-        if match is not None:
-            # id, sequence, start, stop
-            matches.append([read[0], seq, match.start(), match.end()])
+
+        # move on the next read if no match is found
+        if match is None:
+            continue
+
+        # Next, we will check the remaining portion of the read to the left
+        # of the matching sequence. Since the SL is always at the 5' end of a
+        # read we will discard any reads where the matching substring is not
+        # left-anchored, or there are too many mismatches.
+        if match.start() > 0:
+            read_prefix = seq[:match.end()]
+            sl_suffix = spliced_leader[(len(spliced_leader) - match.end()):]
+
+            # compute number of mismatches
+            dist = jellyfish.hamming_distance(read_prefix, sl_suffix)
+
+            # if greater than allowed, continue
+            if dist > args.num_mismatches:
+                # Testing
+                mismatches.append([read[0], seq, match.start(), match.end()])
+                continue
+
+        # if the reads passes both of the above checks, add to results
+        # id, sequence, start, stop
+        matches.append([read[0], seq, match.start(), match.end()])
+
+    # let's also keep the reads which partially match but exceed the mismatch
+    # threshold for now
+    with open(output_file.replace('.csv', '_mismatches.csv'), 'w') as fh:
+        writer=csv.writer(fh, lineterminator='\n')
+        writer.writerow(['id', 'sequence', 'start', 'end'])
+        writer.writerows(mismatches)
 
     # save matched reads to file
     with open(output_file, 'w') as fp:
@@ -229,8 +266,8 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         fp.write(header_comment)
 
         # write header row
-        writer = csv.writer(fp)
-        writer.writerow(['id', 'seq', 'start', 'end'])
+        writer = csv.writer(fp, lineterminator='\n')
+        writer.writerow(['id', 'sequence', 'start', 'end'])
         writer.writerows(matches)
 
 @merge(parse_reads, 
