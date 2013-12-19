@@ -224,10 +224,19 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     # limit to matches of size min_length or greater
     s = spliced_leader[-min_length:]
 
-    # compile regex allowing a single mismatch;
-    # we will filter based on number of mistmatches again later on a larger
-    # portion of the read using the value specified at run-time
-    regex = re.compile('|'.join('%s.%s' % (s[:i], s[i+1:])
+    # To speed things up, we first filter the reads to find all possible hits
+    # by grepping for reads containing at least `min_length` bases of the SL 
+    # sequence. If `num_mismatches` is set to 0, only exact matches are 
+    # allowed. Otherwise a regex is compiled which allows one mismatch at any
+    # position in the first `min_length` bases. While this is not ideal (if
+    # the user has specified a larger value for `num_mismatches` and more than
+    # one occur in this region they will still get filtered out), this
+    # speeds things up significantly generally should not result in many real
+    # SL hits from being removed.
+    if args.num_mismatches == 0:
+        regex = re.compile(s)
+    else:
+        regex = re.compile('|'.join('%s.%s' % (s[:i], s[i+1:])
                            for i in range(len(s))))
 
     # open fastq file
@@ -352,8 +361,9 @@ def compute_read_statistics():
 
     # plot a histogram of the SL lengths captured in the RNA-Seq reads
     df.hist(column='end', bins=len(args.spliced_leader) - args.min_length)
-    plt.title("SL fragment length distribution")
-    plt.savefig('output/figures/sl_length_dist.png')
+    title_text = "SL fragment length distribution ($N=%d$, $\mu=%f$)"
+    plt.title(title_text % (df['end'].size, df['end'].mean()))
+    plt.savefig('output/figures/%s/sl_length_distribution.png' % subdir)
 
 # run pipeline
 if __name__ == "__main__":
