@@ -20,6 +20,14 @@ NOTE
 Initially, development of this script will focus on SL site determination. Once
 this has been properly implemented, support for poly-A analysis will be added.
 
+TODO
+----
+- Generate statistics/plot including:
+    - total number of reads (or number of reads mapped to pathogen)
+    - number of reads remaining after filtering (reads containing SL)
+    - distribution of SL fragment lengths
+- Compare above statistics across samples
+
 Testing
 -------
 
@@ -34,11 +42,15 @@ import sys
 import csv
 import re
 import glob
+import pandas
 import datetime
 import textwrap
 import argparse
 import jellyfish
 from ruffus import *
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
 
 def parse_input():
     """
@@ -178,10 +190,14 @@ args = parse_input()
 #--------------------------------------
 def setup():
     """Create working directories, etc."""
-    directories = ['01-individual_filtered_reads', '02-combined_filtered_reads']
+    directories = ['01-individual_filtered_reads', 
+                   '02-combined_filtered_reads']
     for d in [os.path.join('build', x) for x in directories]:
         if not os.path.exists(d):
             os.makedirs(d, mode=0o755)
+
+    if not os.path.exists('output/figures'):
+        os.makedirs('output/figures', mode=0o755)
 
 @follows(setup)
 @transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
@@ -292,7 +308,7 @@ def filter_reads(input_files, output_file):
         fp.write(header_comment)
 
         # add header fields
-        fp.write("id, sequence, start, end\n")
+        fp.write("id,sequence,start,end\n")
 
         for x in input_files:
             with open(x) as infile:
@@ -302,7 +318,32 @@ def filter_reads(input_files, output_file):
                 # write rest of file contents
                 fp.write(infile.read() + "\n")
 
+@follows(filter_reads)
+def compute_read_statistics():
+    """Computes some basic stats about the distribution of the UTR feature
+    in the RNA-Seq reads"""
+    fp = open('build/02-combined_filtered_reads/matching_reads_all_samples.csv')
+
+    # skip comments
+    line = fp.readline()
+    while line.startswith('#'):
+        line = fp.readline()
+        continue
+
+    # col names
+    #colnames = line.strip().split(',')
+    colnames = line.strip().split(', ')
+
+    # load csv into a pandas dataframe
+    df = pandas.read_csv(fp, header=None, names=colnames)
+    fp.close()
+
+    # plot a histogram of the SL lengths captured in the RNA-Seq reads
+    df.hist(column='start', bins=len(args.spliced_leader) - args.min_length)
+    plt.title("SL fragment length distribution")
+    plt.savefig('output/figures/sl_length_dist.png')
+
 # run pipeline
 if __name__ == "__main__":
-    pipeline_run([filter_reads], verbose=True, multiprocess=12)
+    pipeline_run([compute_read_statistics], verbose=True, multiprocess=12)
 
