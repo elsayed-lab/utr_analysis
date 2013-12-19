@@ -184,24 +184,29 @@ def create_header_comment(filename, description, author, email):
 # Main
 #--------------------------------------
 args = parse_input()
+subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches, args.min_length)
 
 #--------------------------------------
 # Ruffus tasks 
 #--------------------------------------
 def setup():
     """Create working directories, etc."""
-    directories = ['01-individual_filtered_reads', 
-                   '02-combined_filtered_reads']
-    for d in [os.path.join('build', x) for x in directories]:
+    # output and build directories
+    directories = ['build/01-individual_filtered_reads',
+                   'build/02-combined_filtered_reads',
+                   'output/figures']
+
+    # create a subdir based on matching parameters
+    subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches,
+                                             args.min_length)
+    # create directories
+    for d in [os.path.join(x, subdir) for x in directories]:
         if not os.path.exists(d):
             os.makedirs(d, mode=0o755)
 
-    if not os.path.exists('output/figures'):
-        os.makedirs('output/figures', mode=0o755)
-
 @follows(setup)
 @transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
-           r'build/01-individual_filtered_reads/\3.csv', 
+           r'build/01-individual_filtered_reads/%s/\3.csv' % subdir, 
            args.spliced_leader, args.min_length)
 def parse_reads(input_file, output_file, spliced_leader, min_length):
     """
@@ -287,7 +292,8 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         writer.writerows(matches)
 
 @merge(parse_reads, 
-       'build/02-combined_filtered_reads/matching_reads_all_samples.csv')
+       ('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
+        subdir))
 def filter_reads(input_files, output_file):
     """
     Loads reads from fastq files, filters them, and combined output (for
@@ -322,7 +328,9 @@ def filter_reads(input_files, output_file):
 def compute_read_statistics():
     """Computes some basic stats about the distribution of the UTR feature
     in the RNA-Seq reads"""
-    fp = open('build/02-combined_filtered_reads/matching_reads_all_samples.csv')
+    subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches, args.min_length)
+    fp = open('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
+              subdir)
 
     # skip comments
     line = fp.readline()
@@ -331,15 +339,19 @@ def compute_read_statistics():
         continue
 
     # col names
-    #colnames = line.strip().split(',')
-    colnames = line.strip().split(', ')
+    colnames = line.strip().split(',')
 
     # load csv into a pandas dataframe
     df = pandas.read_csv(fp, header=None, names=colnames)
     fp.close()
 
+    # summary statistics
+    print("SL read length distribution:")
+    print(df.groupby('end').size())
+    print(df['end'].describe())
+
     # plot a histogram of the SL lengths captured in the RNA-Seq reads
-    df.hist(column='start', bins=len(args.spliced_leader) - args.min_length)
+    df.hist(column='end', bins=len(args.spliced_leader) - args.min_length)
     plt.title("SL fragment length distribution")
     plt.savefig('output/figures/sl_length_dist.png')
 
