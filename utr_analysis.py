@@ -27,26 +27,29 @@ TODO
     - number of reads remaining after filtering (reads containing SL)
     - distribution of SL fragment lengths
 - Compare above statistics across samples
+- Adding logging (use logging module)
+- PBS support
 
 Testing
 -------
 
 utr_analysis.py \
-    -i "$RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq" \ 
+    -i "$RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq" \
     -f $REF/tcruzi_clbrener/genome/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
     -g $REF/tcruzi_clbrener/annotation/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff      \
     -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG output.csv
 """
 import os
-import sys
-import csv
 import re
+import csv
+import sys
 import glob
 import pandas
+import argparse
 import datetime
 import textwrap
-import argparse
 import jellyfish
+import subprocess
 from ruffus import *
 import matplotlib
 matplotlib.use('Agg')
@@ -84,10 +87,10 @@ def parse_input():
                         help='Genome annotation GFF')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader', 
                         help='Spliced leader DNA sequence')
-    parser.add_argument('-m', '--min-length', default=10, type=int,
+    parser.add_argument('-m', '--min-length'Mathias Ache , default=10, type=int,
                         help='Minimum length of SL match (default=10)')
-    parser.add_argument('-n', '--num-mismatches', default=2, type=int,
-                        help='Number of mismatches to allow (default=2)')
+    parser.add_argument('-n', '--num-mismatches', default=0, type=int,
+                        help='Number of mismatches to allow (default=0)')
     parser.add_argument('-a', '--author', help='Author contact name', 
                         default='')
     parser.add_argument('-e', '--email', help='Author contact email address',
@@ -118,7 +121,7 @@ def readfq(fp):
     https://github.com/lh3/readfq
     """
     last = None # this is a buffer keeping the last unprocessed line
-    while True: # mimic closure; is it a bad idea?
+    while True: # mimic closure; is it a bad iMathias Ache dea?
         if not last: # the first record or a record following a fastq
             for l in fp: # search for the start of the next record
                 if l[0] in '>@': # fasta/q header line
@@ -180,6 +183,17 @@ def create_header_comment(filename, description, author, email):
     return template % (filename, author, email, datetime.datetime.utcnow(),
                        desc_processed, command)
 
+def qsub(cmd, queue='throughput'):
+    """Submits a job to PBS and monitors it until completion"""
+    job_script = """#!/bin/env bash
+    #PBS -N %s
+    #PBS -l walltime=%s
+    #PBS -l %s
+    #PBS -o ./output/%s.out
+    #PBS -e ./error/%s.err
+    cd $PBS_O_WORKDIR
+    %s""" % (job_name, walltime, processors, job_name, job_name, cmd)
+
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -192,7 +206,7 @@ subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches, args.min_length)
 def setup():
     """Create working directories, etc."""
     # output and build directories
-    directories = ['build/01-individual_filtered_reads',
+    directories = ['build/01-filtered_reads',
                    'build/02-combined_filtered_reads',
                    'output/figures']
 
@@ -206,7 +220,7 @@ def setup():
 
 @follows(setup)
 @transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
-           r'build/01-individual_filtered_reads/%s/\3.csv' % subdir, 
+           r'build/01-filtered_reads/%s/\3.fastq' % subdir, 
            args.spliced_leader, args.min_length)
 def parse_reads(input_file, output_file, spliced_leader, min_length):
     """
@@ -226,7 +240,9 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
 
     # To speed things up, we first filter the reads to find all possible hits
     # by grepping for reads containing at least `min_length` bases of the SL 
-    # sequence. If `num_mismatches` is set to 0, only exact matches are 
+    # sequence.
+Mathias Ache 
+    # If `num_mismatches` is set to 0, only exact matches are
     # allowed. Otherwise a regex is compiled which allows one mismatch at any
     # position in the first `min_length` bases. While this is not ideal (if
     # the user has specified a larger value for `num_mismatches` and more than
@@ -243,6 +259,9 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     fastq = open(input_file)
     print("Processing %s" % os.path.basename(input_file))
 
+    # open output fastq file
+    fp = open(output_file, 'w')
+
     # find all reads containing at least `min_length` bases of the feature
     # of interested
     for i, read in enumerate(readfq(fastq)):
@@ -255,50 +274,11 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         if match is None:
             continue
 
-        # Next, we will check the remaining portion of the read to the left
-        # of the matching sequence. Since the SL is always at the 5' end of a
-        # read we will discard any reads where the matching substring is not
-        # left-anchored, or there are too many mismatches.
-        if match.start() > 0:
-            read_prefix = seq[:match.end()]
-            sl_suffix = spliced_leader[(len(spliced_leader) - match.end()):]
+        # otherwise add to output fastq
+        trimmed_read = [read[0], read[1][match.end():], read[2][match.end():]]
+        fp.write("\n".join(trimmed_read) + "\n")
 
-            # compute number of mismatches
-            dist = jellyfish.hamming_distance(read_prefix, sl_suffix)
-
-            # if greater than allowed, continue
-            if dist > args.num_mismatches:
-                # Testing
-                mismatches.append([read[0], seq, match.start(), match.end()])
-                continue
-
-        # if the reads passes both of the above checks, add to results
-        # id, sequence, start, stop
-        matches.append([read[0], seq, match.start(), match.end()])
-
-    # let's also keep the reads which partially match but exceed the mismatch
-    # threshold for now
-    with open(output_file.replace('.csv', '_mismatches.csv'), 'w') as fh:
-        writer=csv.writer(fh, lineterminator='\n')
-        writer.writerow(['id', 'sequence', 'start', 'end'])
-        writer.writerows(mismatches)
-
-    # save matched reads to file
-    with open(output_file, 'w') as fp:
-        # add header comment
-        header_comment = create_header_comment(
-            os.path.basename(output_file),
-            """RNA-Seq reads containing at least %d bases of the UTR feature
-            of interested, allowing up to 1 mismatch.""" % min_length,
-            args.author,
-            args.email
-        )
-        fp.write(header_comment)
-
-        # write header row
-        writer = csv.writer(fp, lineterminator='\n')
-        writer.writerow(['id', 'sequence', 'start', 'end'])
-        writer.writerows(matches)
+    fp.close()
 
 @merge(parse_reads, 
        ('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
@@ -367,5 +347,8 @@ def compute_read_statistics():
 
 # run pipeline
 if __name__ == "__main__":
-    pipeline_run([compute_read_statistics], verbose=True, multiprocess=12)
+    #pipeline_run([compute_read_statistics], verbose=True, multiprocess=8)
+    pipeline_run([parse_reads], verbose=True, multiprocess=8)
+    pipeline_printout_graph("output/figures/utr_analysis_flowchart.png", "png",
+                            [compute_read_statistics])
 

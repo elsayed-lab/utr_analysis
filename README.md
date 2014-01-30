@@ -11,12 +11,20 @@ Overview
 - Genome annotation including CDS coordinates (gff)
 - Spliced leader sequence (for 5'UTR/SL analysis)
 
+
+QUESTION 2013/12/19:
+
+For each n-base suffix of the SL, how often does that suffix occur when
+searched for unanchored? What is the influence on the left-anchored search
+results?
+
 ## Goals
 
 ### Spliced leader analysis
 
 Generate a table containing the location of primary and alternative splice
-acceptor sites for each gene (and condition/sample); usage frequency for acceptor sites.
+acceptor sites for each gene (and condition/sample) along with the usage 
+frequency for acceptor sites.
 
 ### Poly-adenylation analysis
 
@@ -26,6 +34,10 @@ acceptor sites for each gene (and condition/sample); usage frequency for accepto
    sequence (current default n=10).
 2. Remove reads where matching sequence is internal (SL must be at either end
    of a read)
+   - UPDATE: This may not be the case! It appears that many valid SL read
+   contain unrelated sequence at the left of the read (adapter?) that make this
+   filtering step overly stringent.
+   - TODO: Check to see if Trimming adapter sequence improves this picture.
 3. Remove SL portion of sequence and map back to original genome -- site of
    mapping indicates location of splice acceptor site.
 
@@ -58,11 +70,20 @@ SL = SL exon = SL mini-exon
 
 http://www.ncbi.nlm.nih.gov/nucleotide/20977244?report=genbank&log$=nuclalign&blast_rank=34&RID=ASXAKGE901R
 
+# AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG
 > AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
+      AACGCTATTATTGATACAGTTTCTGTACTATATTG
 
 #### L. major (Rastrojo et al. 2013)
 
 > AACTAACGCT ATATAAGTAT CAGTTTCTGT ACTTTATTG
+
+### Comparison
+
+T. cruzi    AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
+             ||||||||||||||||||||||||||||||||||||||
+L. major     ACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
+
 
 ### Gene structure (after trans-splicing)
 
@@ -75,7 +96,6 @@ http://www.ncbi.nlm.nih.gov/nucleotide/20977244?report=genbank&log$=nuclalign&bl
     [100bp]--(~200-400bp)--[100bp]
 
      between 98-100
-
 
 References
 ----------
