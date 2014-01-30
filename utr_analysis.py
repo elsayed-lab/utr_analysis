@@ -45,8 +45,10 @@ import csv
 import sys
 import glob
 import pandas
+import tarfile
 import argparse
 import datetime
+import StringIO
 import textwrap
 import jellyfish
 import subprocess
@@ -87,7 +89,7 @@ def parse_input():
                         help='Genome annotation GFF')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader', 
                         help='Spliced leader DNA sequence')
-    parser.add_argument('-m', '--min-length'Mathias Ache , default=10, type=int,
+    parser.add_argument('-m', '--min-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-n', '--num-mismatches', default=0, type=int,
                         help='Number of mismatches to allow (default=0)')
@@ -121,7 +123,7 @@ def readfq(fp):
     https://github.com/lh3/readfq
     """
     last = None # this is a buffer keeping the last unprocessed line
-    while True: # mimic closure; is it a bad iMathias Ache dea?
+    while True: # mimic closure; is it a bad idea?
         if not last: # the first record or a record following a fastq
             for l in fp: # search for the start of the next record
                 if l[0] in '>@': # fasta/q header line
@@ -194,6 +196,19 @@ def qsub(cmd, queue='throughput'):
     cd $PBS_O_WORKDIR
     %s""" % (job_name, walltime, processors, job_name, job_name, cmd)
 
+def tar_from_stringio(contents, filename, filetype='gz'):
+    """Takes an input StringIO buffer representing a single file and writes
+    a compressed version of the file"""
+    # create TarInfo file with compressed file's name and size
+    contents.seek(0)
+    tarinfo = tarfile.TarInfo(filename)
+    tarinfo.size = contents.len
+
+    # write to compressed fastq file
+    tar = tarfile.open(filename + ".tar.%s" % filetype, "w:%s" % filetype)
+    tar.addfile(tarinfo, contents)
+    tar.close()
+
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -238,10 +253,16 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     # limit to matches of size min_length or greater
     s = spliced_leader[-min_length:]
 
+    # Paired-end reads?
+    input_file_r2 = input_file.replace('_R1_', '_R2_')
+
+    if "_R1_" in output_file and os.path.isfile(input_file_r2):
+        paired_end = True
+
     # To speed things up, we first filter the reads to find all possible hits
     # by grepping for reads containing at least `min_length` bases of the SL 
     # sequence.
-Mathias Ache 
+
     # If `num_mismatches` is set to 0, only exact matches are
     # allowed. Otherwise a regex is compiled which allows one mismatch at any
     # position in the first `min_length` bases. While this is not ideal (if
@@ -259,13 +280,26 @@ Mathias Ache
     fastq = open(input_file)
     print("Processing %s" % os.path.basename(input_file))
 
-    # open output fastq file
-    fp = open(output_file, 'w')
+    # if processing R2, rename to store in separate file
+    if "_R2_" in output_file:
+        output_file = output_file.replace('.fastq', '_SE.fastq')
+
+    # open output string buffer (will write to compressed file later)
+    #fp = open(output_file, 'w')
+    contents = StringIO.StringIO()
+
+    # Keep track of IDs for R1 to find corresponding R2 mate pairs
+    read_ids = []
+
+    # FastQ entry indices
+    ID = 0
+    SEQUENCE = 1
+    QUALITY = 2
 
     # find all reads containing at least `min_length` bases of the feature
     # of interested
     for i, read in enumerate(readfq(fastq)):
-        seq = read[1][:len(spliced_leader)]
+        seq = read[SEQUENCE][:len(spliced_leader)]
 
         # check for match
         match = re.search(regex, seq)
@@ -275,10 +309,38 @@ Mathias Ache
             continue
 
         # otherwise add to output fastq
-        trimmed_read = [read[0], read[1][match.end():], read[2][match.end():]]
-        fp.write("\n".join(trimmed_read) + "\n")
+        trimmed_read = [read[ID],
+                        read[SEQUENCE][match.end():],
+                        read[QUALITY][match.end():]]
+        contents.write("\n".join(trimmed_read) + "\n")
 
-    fp.close()
+        # save id
+        read_ids.append(read[0])
+
+    # write filtered entries to compressed fastq file
+    tar_from_stringio(contents, output_file)
+    contents.close()
+
+    print("Finished processing %s" % os.path.basename(input_file))
+
+    # For R1 reads, grab corresponding R2 entries
+    if paired_end:
+        output_file_r2 = output_file.replace('_R1_', '_R2_')
+
+        print("Processing %s (PE)" % os.path.basename(input_file_r2))
+
+        fastq = open(input_file_r2)
+        contents_r2 = StringIO.StringIO()
+
+        # iterate through each entry in R2
+        for i, read in enumerate(readfq(fastq)):
+            # save entry if it matches one filtered in R1
+            if read[ID] in read_ids:
+                contents_r2.write("\n".join(read) + "\n")
+
+        # write matching paired-end reads to compressed fastq
+        tar_from_stringio(contents_r2, output_file_r2)
+        contents_r2.close()
 
 @merge(parse_reads, 
        ('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
