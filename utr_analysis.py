@@ -44,8 +44,8 @@ import re
 import csv
 import sys
 import glob
+import gzip
 import pandas
-import tarfile
 import argparse
 import datetime
 import StringIO
@@ -196,19 +196,6 @@ def qsub(cmd, queue='throughput'):
     cd $PBS_O_WORKDIR
     %s""" % (job_name, walltime, processors, job_name, job_name, cmd)
 
-def tar_from_stringio(contents, filename, filetype='gz'):
-    """Takes an input StringIO buffer representing a single file and writes
-    a compressed version of the file"""
-    # create TarInfo file with compressed file's name and size
-    contents.seek(0)
-    tarinfo = tarfile.TarInfo(os.path.basename(filename))
-    tarinfo.size = contents.len
-
-    # write to compressed fastq file
-    tar = tarfile.open(filename + ".tar.%s" % filetype, "w:%s" % filetype)
-    tar.addfile(tarinfo, contents)
-    tar.close()
-
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -320,7 +307,12 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         read_ids.append(read[ID])
 
     # write filtered entries to compressed fastq file
-    tar_from_stringio(contents, output_file)
+    fp = gzip.open(output_file + '.gz', 'wb')
+    contents.seek(0)
+    fp.write(contents.read())
+
+    # clean up
+    fp.close()
     fastq.close()
     contents.close()
 
@@ -339,7 +331,6 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         for i, read in enumerate(readfq(fastq)):
             # save entry if it matches one filtered in R1
             if read[ID] == read_ids[0]:
-                print("Adding %s" % read[ID])
                 read_ids.pop(0)
                 contents_r2.write("\n".join(read) + "\n")
             # exit loop when all ids have been found
@@ -347,7 +338,9 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
                 break
 
         # write matching paired-end reads to compressed fastq
-        tar_from_stringio(contents_r2, output_file_r2)
+        fp = gzip.open(output_file_r2 + '.gz', 'wb')
+        contents_r2.seek(0)
+        fp.write(contents_r2.read())
         contents_r2.close()
 
 @merge(parse_reads, 
