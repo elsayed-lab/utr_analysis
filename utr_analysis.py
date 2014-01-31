@@ -201,7 +201,7 @@ def tar_from_stringio(contents, filename, filetype='gz'):
     a compressed version of the file"""
     # create TarInfo file with compressed file's name and size
     contents.seek(0)
-    tarinfo = tarfile.TarInfo(filename)
+    tarinfo = tarfile.TarInfo(os.path.basename(filename))
     tarinfo.size = contents.len
 
     # write to compressed fastq file
@@ -258,6 +258,8 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
 
     if "_R1_" in output_file and os.path.isfile(input_file_r2):
         paired_end = True
+    else:
+        paired_end = False
 
     # To speed things up, we first filter the reads to find all possible hits
     # by grepping for reads containing at least `min_length` bases of the SL 
@@ -315,10 +317,11 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         contents.write("\n".join(trimmed_read) + "\n")
 
         # save id
-        read_ids.append(read[0])
+        read_ids.append(read[ID])
 
     # write filtered entries to compressed fastq file
     tar_from_stringio(contents, output_file)
+    fastq.close()
     contents.close()
 
     print("Finished processing %s" % os.path.basename(input_file))
@@ -335,8 +338,13 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         # iterate through each entry in R2
         for i, read in enumerate(readfq(fastq)):
             # save entry if it matches one filtered in R1
-            if read[ID] in read_ids:
+            if read[ID] == read_ids[0]:
+                print("Adding %s" % read[ID])
+                read_ids.pop(0)
                 contents_r2.write("\n".join(read) + "\n")
+            # exit loop when all ids have been found
+            if len(read_ids) == 0:
+                break
 
         # write matching paired-end reads to compressed fastq
         tar_from_stringio(contents_r2, output_file_r2)
