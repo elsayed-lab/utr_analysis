@@ -130,7 +130,10 @@ def readfq(fp):
                     last = l[:-1] # save this line
                     break
         if not last: break
-        name, seqs, last = last[1:].partition(" ")[0], [], None
+        # Modified to preserve full identifier
+        # Keith 2014-01-31
+        # name, seqs, last = last[1:].partition(" ")[0], [], None
+        name, seqs, last = last, [], None
         for l in fp: # read the sequence
             if l[0] in '@+>':
                 last = l[:-1]
@@ -246,6 +249,8 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     if "_R1_" in output_file and os.path.isfile(input_file_r2):
         paired_end = True
     else:
+        # If processing R2, rename to store in separate file
+        output_file = output_file.replace('.fastq', '_SE.fastq')
         paired_end = False
 
     # To speed things up, we first filter the reads to find all possible hits
@@ -268,10 +273,6 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     # open fastq file
     fastq = open(input_file)
     print("Processing %s" % os.path.basename(input_file))
-
-    # if processing R2, rename to store in separate file
-    if "_R2_" in output_file:
-        output_file = output_file.replace('.fastq', '_SE.fastq')
 
     # open output string buffer (will write to compressed file later)
     #fp = open(output_file, 'w')
@@ -300,11 +301,12 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         # otherwise add to output fastq
         trimmed_read = [read[ID],
                         read[SEQUENCE][match.end():],
+                        "+",
                         read[QUALITY][match.end():]]
         contents.write("\n".join(trimmed_read) + "\n")
 
         # save id
-        read_ids.append(read[ID])
+        read_ids.append(read[ID].replace('1:N', '2:N'))
 
     # write filtered entries to compressed fastq file
     fp = gzip.open(output_file + '.gz', 'wb')
@@ -332,7 +334,8 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
             # save entry if it matches one filtered in R1
             if read[ID] == read_ids[0]:
                 read_ids.pop(0)
-                contents_r2.write("\n".join(read) + "\n")
+                fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
+                contents_r2.write("\n".join(fastq_entry) + "\n")
             # exit loop when all ids have been found
             if len(read_ids) == 0:
                 break
