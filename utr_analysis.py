@@ -216,8 +216,9 @@ def setup():
                    'output/figures']
 
     # create a subdir based on matching parameters
-    subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches,
-                                             args.min_length)
+    #subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches,
+    #                                         args.min_length)
+
     # create directories
     for d in [os.path.join(x, subdir) for x in directories]:
         if not os.path.exists(d):
@@ -253,6 +254,12 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
         output_file = output_file.replace('.fastq', '_SE.fastq')
         paired_end = False
 
+    # Save complete (untrimmed) reads containing a portion of the SL sequence
+    # as well. By mapping these reads to the genome we can find false hits -- 
+    # i.e. reads that contain a part of the SL sequence that is not actually 
+    # from the SL.
+    output_file_complete = output_file.replace('.fastq', '_complete.fastq')
+
     # To speed things up, we first filter the reads to find all possible hits
     # by grepping for reads containing at least `min_length` bases of the SL 
     # sequence.
@@ -276,7 +283,8 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
 
     # open output string buffer (will write to compressed file later)
     #fp = open(output_file, 'w')
-    contents = StringIO.StringIO()
+    trimmed_output = StringIO.StringIO()
+    untrimmed_output = StringIO.StringIO()
 
     # Keep track of IDs for R1 to find corresponding R2 mate pairs
     read_ids = []
@@ -303,20 +311,34 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
                         read[SEQUENCE][match.end():],
                         "+",
                         read[QUALITY][match.end():]]
-        contents.write("\n".join(trimmed_read) + "\n")
+        trimmed_output.write("\n".join(trimmed_read) + "\n")
+
+        # also save untrimmed read (for finding false SL hits)
+        untrimmed_read = [read[ID],
+                          read[SEQUENCE],
+                          "+",
+                          read[QUALITY]]
+        untrimmed_output.write("\n".join(untrimmed_read) + "\n")
 
         # save id
         read_ids.append(read[ID].replace('1:N', '2:N'))
 
     # write filtered entries to compressed fastq file
     fp = gzip.open(output_file + '.gz', 'wb')
-    contents.seek(0)
-    fp.write(contents.read())
+    trimmed_output.seek(0)
+    fp.write(trimmed_output.read())
+    fp.close()
+
+    # write complete filtered entries to compressed fastq file
+    fp = gzip.open(output_file_complete + '.gz', 'wb')
+    untrimmed_output.seek(0)
+    fp.write(untrimmed_output.read())
+    fp.close()
 
     # clean up
-    fp.close()
     fastq.close()
-    contents.close()
+    trimmed_output.close()
+    untrimmed_output.close()
 
     print("Finished processing %s" % os.path.basename(input_file))
 
