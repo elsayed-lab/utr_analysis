@@ -45,6 +45,7 @@ import csv
 import sys
 import glob
 import gzip
+import pysam
 import pandas
 import argparse
 import datetime
@@ -86,7 +87,7 @@ def parse_input():
     # Add arguments
     parser.add_argument('-i', '--input-reads', required=True,
                         help='RNA-Seq FASTQ glob string')
-    parser.add_argument('-f', '--fasta-genome', dest='fasta', required=True,
+    parser.add_argument('-f', '--fasta-genome', dest='genome', required=True,
                         help='Genome sequence FASTA filepath')
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
                         help='Genome annotation GFF')
@@ -105,7 +106,7 @@ def parse_input():
     args = parser.parse_args()
 
     # Replace any environmental variables and return args
-    args.fasta = os.path.expandvars(args.fasta)
+    args.genome = os.path.expandvars(args.genome)
     args.input_reads = os.path.expandvars(args.input_reads)
     args.gff = os.path.expandvars(args.gff)
 
@@ -188,6 +189,39 @@ def create_header_comment(filename, description, author, email):
     return template % (filename, author, email, datetime.datetime.utcnow(),
                        desc_processed, command)
 
+def run_tophat(output_dir, genome, r1, r2="", num_threads=8, 
+               max_multihits=1, extra_args=""):
+    """Uses Tophat to map reads with the specified settings."""
+    # create output directory
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, mode=0o755)
+
+    # build command
+    tophat_cmd = ["tophat", "--num-threads", str(num_threads), 
+                  "--max-multihits", str(max_multihits)] + extra_args.split() + ["-o", output_dir, 
+                  genome, r1, r2]
+
+    # run tophat
+    print(" ".join(tophat_cmd))
+    ret = subprocess.call(tophat_cmd)
+
+    # check to see if tophat succeeded
+    if ret != 0:
+        return ret
+
+    # sort and index bam output using samtools
+    base_output = os.path.join(output_dir, 'accepted_hits')
+    sort_cmd = ['samtools', 'sort', '-@', str(num_threads), 
+                base_output + ".bam", base_output + "_sorted"]
+    print(" ".join(sort_cmd))
+    subprocess.call(sort_cmd)
+
+    index_cmd = ['samtools', 'index', base_output + '_sorted.bam']
+    print(" ".join(index_cmd))
+    subprocess.call(index_cmd)
+
+    return 0
+
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -206,7 +240,7 @@ def setup():
                             'minlength-%d' % args.min_length)
 
     # create directories
-    sub_dirs = ['fastq', 'tophat']
+    sub_dirs = ['fastq', 'tophat', 'ruffus']
 
     for d in [os.path.join(base_dir, subdir) for subdir in sub_dirs]:
         if not os.path.exists(d):
@@ -223,12 +257,13 @@ def setup():
 # \4 - _anything_else_before_ext
 #
 @follows(setup)
-@split(args.input_reads,
+@transform(args.input_reads,
            regex(r"^(.*/)?(HPGL[0-9]+)_(R[1-2])_(.+)\.fastq"),
-           [r'build/%s/fastq/\2/possible_sl_reads/*.fastq.gz' % subdir,
-            r'build/%s/fastq/\2/possible_sl_reads/FINISHED' % subdir],
+           r'build/%s/ruffus/\2_\3.parse_reads' % subdir,
+           r'\2', r'\3', r'\4',
            args.spliced_leader, args.min_length)
-def parse_reads(input_file, output_files, spliced_leader, min_length):
+def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
+                spliced_leader, min_length):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing the feature of interest (SL or polyA tail).
@@ -252,12 +287,6 @@ def parse_reads(input_file, output_files, spliced_leader, min_length):
         *_R1_match_with_sl.fastq
         *_R1_match_without_sl.fastq
     """
-    # input filename parts
-    input_regex = re.compile(r"^(.*/)?(HPGL[0-9]+)_(R[1-2])_(.+)\.fastq")
-
-    match = re.match(input_regex, input_file)
-    input_dir, hpgl_id, read_num, file_suffx = match.groups()
-
     # list to keep track of potential SL reads
     matches = []
 
@@ -380,7 +409,6 @@ def parse_reads(input_file, output_files, spliced_leader, min_length):
     # as well. By mapping these reads to the genome we can find false hits -- 
     # i.e. reads that contain a part of the SL sequence that is not actually 
     # from the SL.
-    #output_file_complete = output_file.replace('.fastq', '_complete.fastq')
 
     # write filtered entries to compressed fastq file
     fp = gzip.open(output_without_sl + '.gz', 'wb')
@@ -429,79 +457,117 @@ def parse_reads(input_file, output_files, spliced_leader, min_length):
     mated_reads.close()
 
     # Let Ruffus know we are done
-    open(output_files[-1], 'w').close()
+    open(output_file, 'w').close()
 
-@merge(parse_reads, 
-       ('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
-        subdir))
-def filter_reads(input_files, output_file):
-    """
-    Loads reads from fastq files, filters them, and combined output (for
-    now) into a single file.
-    """
-    # write output
-    with open(output_file, 'w') as fp:
-        # add header comment
-        header_comment = create_header_comment(
-            os.path.basename(output_file),
-            """A collection of trimmed and filtered RNA-Seq reads containing at 
-             least some portion of the UTR feature of interest in the correct 
-             position. This file contains the combined results from all samples
-             included in the analysis.""",
-            args.author,
-            args.email
-        )
-        fp.write(header_comment)
+@transform(parse_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).parse_reads'),
+           r'\1/\2_\3.remove_false_hits',
+           r'\2', r'\3')
+def remove_false_hits(input_file, output_file, hpgl_id, read_num):
+    #def run_tophat(output_dir, reference, r1, r2="", num_threads=8, 
+    #max_multihits=1, extra_args=""):
+    output_dir = 'build/%s/tophat/%s/%s_false_hits' % (subdir, hpgl_id, read_num)
+    genome = os.path.splitext(args.genome)[0]
 
-        # add header fields
-        fp.write("id,sequence,start,end\n")
+    # input read base directory
+    basedir = 'build/%s/fastq/%s/possible_sl_reads' % (subdir, hpgl_id)
 
-        for x in input_files:
-            with open(x) as infile:
-                # skip over commments and field names
-                while infile.readline().startswith("#"):
-                    continue
-                # write rest of file contents
-                fp.write(infile.read() + "\n")
+    # R1 filepath (including matched SL sequence)
+    if (read_num == 'R1'):
+        r1_filepath = '%s/%s_R1_match_R1_with_sl.fastq.gz' % (basedir, hpgl_id)
 
-@follows(filter_reads)
-def compute_read_statistics():
-    """Computes some basic stats about the distribution of the UTR feature
-    in the RNA-Seq reads"""
-    subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches, args.min_length)
-    fp = open('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
-              subdir)
+        # R2 filepath (for PE reads)
+        r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
 
-    # skip comments
-    line = fp.readline()
-    while line.startswith('#'):
-        line = fp.readline()
-        continue
+        if not os.path.exists(r2_filepath):
+            r2_filepath = ""
+    # R2
+    else:
+        r2_filepath = '%s/%s_R2_match_R2_with_sl.fastq.gz' % (basedir, hpgl_id)
+        r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
 
-    # col names
-    colnames = line.strip().split(',')
+    # Map reads using Tophat
+    # @TODO parameterize extra_args (except for --no-mixed in this case) to
+    # allow for easier customization
+    ret = run_tophat(output_dir, genome, r1_filepath, r2_filepath,
+                     extra_args='--mate-inner-dist 170 --no-mixed')
 
-    # load csv into a pandas dataframe
-    df = pandas.read_csv(fp, header=None, names=colnames)
-    fp.close()
+    # Let Ruffus know we are done
+    if ret == 0:
+        open(output_file, 'w').close()
+    else:
+        print("Error running tophat!")
 
-    # summary statistics
-    print("SL read length distribution:")
-    print(df.groupby('end').size())
-    print(df['end'].describe())
+#@merge(parse_reads,
+       #('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
+        #subdir))
+#def filter_reads(input_files, output_file):
+    #"""
+    #Loads reads from fastq files, filters them, and combined output (for
+    #now) into a single file.
+    #"""
+    ## write output
+    #with open(output_file, 'w') as fp:
+        ## add header comment
+        #header_comment = create_header_comment(
+            #os.path.basename(output_file),
+            #"""A collection of trimmed and filtered RNA-Seq reads containing at 
+             #least some portion of the UTR feature of interest in the correct 
+             #position. This file contains the combined results from all samples
+             #included in the analysis.""",
+            #args.author,
+            #args.email
+        #)
+        #fp.write(header_comment)
 
-    # plot a histogram of the SL lengths captured in the RNA-Seq reads
-    df.hist(column='end', bins=len(args.spliced_leader) - args.min_length)
-    title_text = "SL fragment length distribution ($N=%d$, $\mu=%f$)"
-    plt.title(title_text % (df['end'].size, df['end'].mean()))
-    #plt.savefig('output/figures/%s/sl_length_distribution.png' % subdir)
-    plt.savefig('sl_length_distribution.png' % subdir)
+        ## add header fields
+        #fp.write("id,sequence,start,end\n")
+
+        #for x in input_files:
+            #with open(x) as infile:
+                ## skip over commments and field names
+                #while infile.readline().startswith("#"):
+                    #continue
+                ## write rest of file contents
+                #fp.write(infile.read() + "\n")
+
+#@follows(filter_reads)
+#def compute_read_statistics():
+    #"""Computes some basic stats about the distribution of the UTR feature
+    #in the RNA-Seq reads"""
+    #subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches, args.min_length)
+    #fp = open('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
+              #subdir)
+
+    ## skip comments
+    #line = fp.readline()
+    #while line.startswith('#'):
+        #line = fp.readline()
+        #continue
+
+    ## col names
+    #colnames = line.strip().split(',')
+
+    ## load csv into a pandas dataframe
+    #df = pandas.read_csv(fp, header=None, names=colnames)
+    #fp.close()
+
+    ## summary statistics
+    #print("SL read length distribution:")
+    #print(df.groupby('end').size())
+    #print(df['end'].describe())
+
+    ## plot a histogram of the SL lengths captured in the RNA-Seq reads
+    #df.hist(column='end', bins=len(args.spliced_leader) - args.min_length)
+    #title_text = "SL fragment length distribution ($N=%d$, $\mu=%f$)"
+    #plt.title(title_text % (df['end'].size, df['end'].mean()))
+    ##plt.savefig('output/figures/%s/sl_length_distribution.png' % subdir)
+    #plt.savefig('sl_length_distribution.png' % subdir)
 
 # run pipeline
 if __name__ == "__main__":
-    #pipeline_run([compute_read_statistics], verbose=True, multiprocess=8)
-    pipeline_run([parse_reads], verbose=True, multiprocess=8)
+    pipeline_run([remove_false_hits], verbose=True, multiprocess=8)
     #pipeline_printout_graph("output/figures/utr_analysis_flowchart.png", "png",
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
-                            [compute_read_statistics])
+                            [remove_false_hits])
 
