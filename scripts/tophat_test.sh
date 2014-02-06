@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tophat SL mapping test
-CONDITION="mismatches-0_minlength-10"
+CONDITION="mismatches-0_minlength-6"
 BASE_OUTPUTDIR=build/tophat/${CONDITION}
 GENOME_DIR=/cbcb/lab/nelsayed/ref_data/tcruzi_clbrener/genome/tc_esmer
 REF=${GENOME_DIR}/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome

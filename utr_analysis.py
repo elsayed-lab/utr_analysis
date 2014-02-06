@@ -37,7 +37,7 @@ utr_analysis.py \
     -i "$RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq" \
     -f $REF/tcruzi_clbrener/genome/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
     -g $REF/tcruzi_clbrener/annotation/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff      \
-    -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG output.csv
+    -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
 """
 import os
 import re
@@ -57,6 +57,9 @@ import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
+#--------------------------------------
+# Non-Ruffus functions
+#--------------------------------------
 def parse_input():
     """
     Parses script input and returns values.
@@ -70,7 +73,7 @@ def parse_input():
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
         -f TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
         -g TrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff             \\
-        -m 12 -n 3 output.csv
+        -m 12 -n 3
     """)
 
     # Create ArgumentParser instance
@@ -97,8 +100,6 @@ def parse_input():
                         default='')
     parser.add_argument('-e', '--email', help='Author contact email address',
                         default='')
-    parser.add_argument('output', metavar='OUTPUT FILENAME',
-                        help='Filepath to write CSV output to.')
 
     # Parse arguments
     args = parser.parse_args()
@@ -107,7 +108,6 @@ def parse_input():
     args.fasta = os.path.expandvars(args.fasta)
     args.input_reads = os.path.expandvars(args.input_reads)
     args.gff = os.path.expandvars(args.gff)
-    args.output = os.path.expandvars(args.output)
 
     # set defaults for author if none is specified
     if args.author is "":
@@ -188,77 +188,81 @@ def create_header_comment(filename, description, author, email):
     return template % (filename, author, email, datetime.datetime.utcnow(),
                        desc_processed, command)
 
-def qsub(cmd, queue='throughput'):
-    """Submits a job to PBS and monitors it until completion"""
-    job_script = """#!/bin/env bash
-    #PBS -N %s
-    #PBS -l walltime=%s
-    #PBS -l %s
-    #PBS -o ./output/%s.out
-    #PBS -e ./error/%s.err
-    cd $PBS_O_WORKDIR
-    %s""" % (job_name, walltime, processors, job_name, job_name, cmd)
-
 #--------------------------------------
 # Main
 #--------------------------------------
 args = parse_input()
-subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches, args.min_length)
+subdir = os.path.join('mismatches-%d' % args.num_mismatches,
+                      'minlength-%d' % args.min_length)
 
 #--------------------------------------
-# Ruffus tasks 
+# Ruffus tasks
 #--------------------------------------
 def setup():
     """Create working directories, etc."""
-    # output and build directories
-    directories = ['build/01-filtered_reads',
-                   'build/02-combined_filtered_reads',
-                   'output/figures']
-
-    # create a subdir based on matching parameters
-    #subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches,
-    #                                         args.min_length)
+    # create subdirs based on matching parameters
+    base_dir = os.path.join('build',
+                            'mismatches-%d' % args.num_mismatches,
+                            'minlength-%d' % args.min_length)
 
     # create directories
-    for d in [os.path.join(x, subdir) for x in directories]:
+    sub_dirs = ['fastq', 'tophat']
+
+    for d in [os.path.join(base_dir, subdir) for subdir in sub_dirs]:
         if not os.path.exists(d):
             os.makedirs(d, mode=0o755)
 
+#
+# Input regex explanation:
+#
+# Ex. "$RAW/tcruzir21/HPGL0121/processed/HPGL0121_R1_filtered.fastq"
+#
+# \1 - directory
+# \2 - HPGLxxxx
+# \3 - R1/R2
+# \4 - _anything_else_before_ext
+#
 @follows(setup)
-@transform(args.input_reads, regex(r"^((.*)/)?(.+)\.fastq"),
-           r'build/01-filtered_reads/%s/\3.fastq' % subdir, 
+@split(args.input_reads,
+           regex(r"^(.*/)?(HPGL[0-9]+)_(R[1-2])_(.+)\.fastq"),
+           [r'build/%s/fastq/\2/possible_sl_reads/*.fastq.gz' % subdir,
+            r'build/%s/fastq/\2/possible_sl_reads/FINISHED' % subdir],
            args.spliced_leader, args.min_length)
-def parse_reads(input_file, output_file, spliced_leader, min_length):
+def parse_reads(input_file, output_files, spliced_leader, min_length):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing the feature of interest (SL or polyA tail).
+
+    Output files
+    ------------
+    There are three possible sets of output files for this function depending
+    on whether the input read comes from a mated-pair of reads or a single
+    read, and whether (for the case of mated-pair reads) it is the left read
+    or right read:
+
+    1. Paired-end, SL suffix in R1
+        *_R1_match_R1_with_sl.fastq
+        *_R1_match_R1_without_sl.fastq
+        *_R1_match_R2.fastq
+    2. Paired-end, SL suffix in R2
+        *_R2_match_R2_with_sl.fastq
+        *_R2_match_R2_without_sl.fastq
+        *_R2_match_R1.fastq
+    3. Single-end reads
+        *_R1_match_with_sl.fastq
+        *_R1_match_without_sl.fastq
     """
+    # input filename parts
+    input_regex = re.compile(r"^(.*/)?(HPGL[0-9]+)_(R[1-2])_(.+)\.fastq")
+
+    match = re.match(input_regex, input_file)
+    input_dir, hpgl_id, read_num, file_suffx = match.groups()
+
+    # list to keep track of potential SL reads
     matches = []
 
-    # Testing 2013/12/18
-    # For now, let's also keep the reads which match a part of the SL, but
-    # contain a larger number of mismatches. Once it has been verified that
-    # there is nothing interesting here, these can probably just be ignored
-    mismatches = [] 
-
     # limit to matches of size min_length or greater
-    s = spliced_leader[-min_length:]
-
-    # Paired-end reads?
-    input_file_r2 = input_file.replace('_R1_', '_R2_')
-
-    if "_R1_" in output_file and os.path.isfile(input_file_r2):
-        paired_end = True
-    else:
-        # If processing R2, rename to store in separate file
-        output_file = output_file.replace('.fastq', '_SE.fastq')
-        paired_end = False
-
-    # Save complete (untrimmed) reads containing a portion of the SL sequence
-    # as well. By mapping these reads to the genome we can find false hits -- 
-    # i.e. reads that contain a part of the SL sequence that is not actually 
-    # from the SL.
-    output_file_complete = output_file.replace('.fastq', '_complete.fastq')
+    suffix = spliced_leader[-min_length:]
 
     # To speed things up, we first filter the reads to find all possible hits
     # by grepping for reads containing at least `min_length` bases of the SL 
@@ -272,21 +276,20 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
     # speeds things up significantly generally should not result in many real
     # SL hits from being removed.
     if args.num_mismatches == 0:
-        regex = re.compile(s)
+        regex = re.compile(suffix)
     else:
-        regex = re.compile('|'.join('%s.%s' % (s[:i], s[i+1:])
-                           for i in range(len(s))))
+        regex = re.compile('|'.join('%s.%s' % (suffix[:i], suffix[i+1:])
+                           for i in range(len(suffix))))
 
     # open fastq file
     fastq = open(input_file)
     print("Processing %s" % os.path.basename(input_file))
 
     # open output string buffer (will write to compressed file later)
-    #fp = open(output_file, 'w')
-    trimmed_output = StringIO.StringIO()
-    untrimmed_output = StringIO.StringIO()
+    reads_without_sl = StringIO.StringIO()
+    reads_with_sl = StringIO.StringIO()
 
-    # Keep track of IDs for R1 to find corresponding R2 mate pairs
+    # Keep track of matched read IDs
     read_ids = []
 
     # FastQ entry indices
@@ -311,62 +314,122 @@ def parse_reads(input_file, output_file, spliced_leader, min_length):
                         read[SEQUENCE][match.end():],
                         "+",
                         read[QUALITY][match.end():]]
-        trimmed_output.write("\n".join(trimmed_read) + "\n")
+        reads_without_sl.write("\n".join(trimmed_read) + "\n")
 
         # also save untrimmed read (for finding false SL hits)
         untrimmed_read = [read[ID],
                           read[SEQUENCE],
                           "+",
                           read[QUALITY]]
-        untrimmed_output.write("\n".join(untrimmed_read) + "\n")
+        reads_with_sl.write("\n".join(untrimmed_read) + "\n")
 
         # save id
-        read_ids.append(read[ID].replace('1:N', '2:N'))
+        if read_num == 'R1':
+            read_ids.append(read[ID].replace('1:N', '2:N'))
+        else:
+            read_ids.append(read[ID].replace('2:N', '1:N'))
+
+    # Save matched fastq entries
+    if os.path.isfile(input_file.replace('_R1_', '_R2_')):
+        paired_end = True
+
+        # Case 1: Left-read of PE reads
+        if read_num == 'R1':
+            output_filename = '%s_R1_match' % (hpgl_id)
+            output_base = 'build/%s/fastq/%s/%s/%s' % (
+                subdir, hpgl_id, 'possible_sl_reads', output_filename
+            )
+
+            output_with_sl = "%s_R1_with_sl.fastq" % output_base
+            output_without_sl = "%s_R1_without_sl.fastq" % output_base
+
+            # mated reads
+            input_mated_reads = input_file.replace("R1", "R2")
+            output_mated_reads = "%s_R2.fastq" % output_base
+        else:
+            # Case 2: Right-read of PE reads
+            output_filename = '%s_R2_match' % (hpgl_id)
+            output_base = 'build/%s/fastq/%s/%s/%s' % (
+                subdir, hpgl_id, 'possible_sl_reads', output_filename
+            )
+
+            output_with_sl = "%s_R2_with_sl.fastq" % output_base
+            output_without_sl = "%s_R2_without_sl.fastq" % output_base
+
+            # mated reads
+            input_mated_reads = input_file.replace("R2", "R1")
+            output_mated_reads = "%s_R1.fastq" % output_base
+    # Case 3: SE read
+    else:
+        paired_end = False
+
+        output_filename = '%s_R1' % (hpgl_id)
+        output_base = 'build/%s/fastq/%s/%s/%s' % (
+            subdir, hpgl_id, 'possible_sl_reads', output_filename
+        )
+
+        output_with_sl = "%s_with_sl.fastq" % output_base
+        output_without_sl = "%s_without_sl.fastq" % output_base
+
+    # Create output directory
+    output_dir = os.path.dirname(output_base)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, mode=0o755)
+
+    # Save complete (untrimmed) reads containing a portion of the SL sequence
+    # as well. By mapping these reads to the genome we can find false hits -- 
+    # i.e. reads that contain a part of the SL sequence that is not actually 
+    # from the SL.
+    #output_file_complete = output_file.replace('.fastq', '_complete.fastq')
 
     # write filtered entries to compressed fastq file
-    fp = gzip.open(output_file + '.gz', 'wb')
-    trimmed_output.seek(0)
-    fp.write(trimmed_output.read())
+    fp = gzip.open(output_without_sl + '.gz', 'wb')
+    reads_without_sl.seek(0)
+    fp.write(reads_without_sl.read())
     fp.close()
 
     # write complete filtered entries to compressed fastq file
-    fp = gzip.open(output_file_complete + '.gz', 'wb')
-    untrimmed_output.seek(0)
-    fp.write(untrimmed_output.read())
+    fp = gzip.open(output_with_sl + '.gz', 'wb')
+    reads_with_sl.seek(0)
+    fp.write(reads_with_sl.read())
     fp.close()
 
     # clean up
     fastq.close()
-    trimmed_output.close()
-    untrimmed_output.close()
+    reads_without_sl.close()
+    reads_with_sl.close()
 
     print("Finished processing %s" % os.path.basename(input_file))
 
+    # For single-end reads, stop here
+    if not paired_end:
+        return
+
     # For R1 reads, grab corresponding R2 entries
-    if paired_end:
-        output_file_r2 = output_file.replace('_R1_', '_R2_')
+    print("Processing %s (mated pair)" % os.path.basename(input_mated_reads))
 
-        print("Processing %s (PE)" % os.path.basename(input_file_r2))
+    fastq = open(input_mated_reads)
+    mated_reads = StringIO.StringIO()
 
-        fastq = open(input_file_r2)
-        contents_r2 = StringIO.StringIO()
+    # iterate through each entry in R2
+    for i, read in enumerate(readfq(fastq)):
+        # save entry if it matches one filtered in R1
+        if read[ID] == read_ids[0]:
+            read_ids.pop(0)
+            fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
+            mated_reads.write("\n".join(fastq_entry) + "\n")
+        # exit loop when all ids have been found
+        if len(read_ids) == 0:
+            break
 
-        # iterate through each entry in R2
-        for i, read in enumerate(readfq(fastq)):
-            # save entry if it matches one filtered in R1
-            if read[ID] == read_ids[0]:
-                read_ids.pop(0)
-                fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
-                contents_r2.write("\n".join(fastq_entry) + "\n")
-            # exit loop when all ids have been found
-            if len(read_ids) == 0:
-                break
+    # write matching paired-end reads to compressed fastq
+    fp = gzip.open(output_mated_reads + '.gz', 'wb')
+    mated_reads.seek(0)
+    fp.write(mated_reads.read())
+    mated_reads.close()
 
-        # write matching paired-end reads to compressed fastq
-        fp = gzip.open(output_file_r2 + '.gz', 'wb')
-        contents_r2.seek(0)
-        fp.write(contents_r2.read())
-        contents_r2.close()
+    # Let Ruffus know we are done
+    open(output_files[-1], 'w').close()
 
 @merge(parse_reads, 
        ('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
@@ -431,12 +494,14 @@ def compute_read_statistics():
     df.hist(column='end', bins=len(args.spliced_leader) - args.min_length)
     title_text = "SL fragment length distribution ($N=%d$, $\mu=%f$)"
     plt.title(title_text % (df['end'].size, df['end'].mean()))
-    plt.savefig('output/figures/%s/sl_length_distribution.png' % subdir)
+    #plt.savefig('output/figures/%s/sl_length_distribution.png' % subdir)
+    plt.savefig('sl_length_distribution.png' % subdir)
 
 # run pipeline
 if __name__ == "__main__":
     #pipeline_run([compute_read_statistics], verbose=True, multiprocess=8)
     pipeline_run([parse_reads], verbose=True, multiprocess=8)
-    pipeline_printout_graph("output/figures/utr_analysis_flowchart.png", "png",
+    #pipeline_printout_graph("output/figures/utr_analysis_flowchart.png", "png",
+    pipeline_printout_graph("utr_analysis_flowchart.png", "png",
                             [compute_read_statistics])
 
