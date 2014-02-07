@@ -232,6 +232,17 @@ def run_tophat(output_dir, genome, r1, r2="", num_threads=1,
 
     return 0
 
+def gzip_str(filepath, strbuffer):
+    """Takes a StringIO buffer and writes the output to a gzip-compressed
+    file."""
+    # go to beginning of string buffer
+    strbuffer.seek(0)
+
+    # write contents to a gzip-compressed file
+    fp = gzip.open(filepath + '.gz', 'wb')
+    fp.write(strbuffer.read())
+    fp.close()
+
 def filter_fastq(infile, outfile, read_ids):
     """Takes a filepath to a FASTQ file and returns a new version of the file
     which contains only reads with the specified ids"""
@@ -250,12 +261,8 @@ def filter_fastq(infile, outfile, read_ids):
             break
 
     # write matching paired-end reads to compressed fastq
-    fp = gzip.open(outfile + '.gz', 'wb')
-    filtered_reads.seek(0)
-    fp.write(filtered_reads.read())
+    gzip_str(outfile, filtered_reads)
     filtered_reads.close()
-    fp.close()
-
 
 #--------------------------------------
 # Main
@@ -445,17 +452,9 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     # i.e. reads that contain a part of the SL sequence that is not actually 
     # from the SL.
 
-    # write filtered entries to compressed fastq file
-    fp = gzip.open(output_without_sl + '.gz', 'wb')
-    reads_without_sl.seek(0)
-    fp.write(reads_without_sl.read())
-    fp.close()
-
-    # write complete filtered entries to compressed fastq file
-    fp = gzip.open(output_with_sl + '.gz', 'wb')
-    reads_with_sl.seek(0)
-    fp.write(reads_with_sl.read())
-    fp.close()
+    # write trimmed and untrimmed reads to fastq.gz
+    gzip_str(output_without_sl, reads_without_sl)
+    gzip_str(output_with_sl, reads_with_sl)
 
     # clean up
     fastq.close()
