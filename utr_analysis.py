@@ -189,9 +189,26 @@ def create_header_comment(filename, description, author, email):
     return template % (filename, author, email, datetime.datetime.utcnow(),
                        desc_processed, command)
 
-def run_tophat(output_dir, genome, r1, r2="", num_threads=8, 
-               max_multihits=1, extra_args=""):
-    """Uses Tophat to map reads with the specified settings."""
+def sort_and_index(base_output, num_threads=1):
+    """Sorts and indexes .bam files using samtools"""
+    sort_cmd = ['samtools', 'sort', '-@', str(num_threads), 
+                base_output + ".bam", base_output + "_sorted"]
+    print(" ".join(sort_cmd))
+    subprocess.call(sort_cmd)
+
+    index_cmd = ['samtools', 'index', base_output + '_sorted.bam']
+    print(" ".join(index_cmd))
+    subprocess.call(index_cmd)
+
+def run_tophat(output_dir, genome, r1, r2="", num_threads=1, 
+               max_multihits=20, extra_args=""):
+    """
+    Uses Tophat to map reads with the specified settings.
+
+    @NOTE 2014/02/06 -- Tophat 2.0.10 fails for some reads when attempting
+    to use more than one thread. For now, just perform the mapping
+    using a single-thread to be safe...
+    """
     # create output directory
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, mode=0o755)
@@ -210,17 +227,35 @@ def run_tophat(output_dir, genome, r1, r2="", num_threads=8,
         return ret
 
     # sort and index bam output using samtools
-    base_output = os.path.join(output_dir, 'accepted_hits')
-    sort_cmd = ['samtools', 'sort', '-@', str(num_threads), 
-                base_output + ".bam", base_output + "_sorted"]
-    print(" ".join(sort_cmd))
-    subprocess.call(sort_cmd)
-
-    index_cmd = ['samtools', 'index', base_output + '_sorted.bam']
-    print(" ".join(index_cmd))
-    subprocess.call(index_cmd)
+    sort_and_index(os.path.join(output_dir, 'accepted_hits'), num_threads)
+    sort_and_index(os.path.join(output_dir, 'unmapped'), num_threads)
 
     return 0
+
+def filter_fastq(infile, outfile, read_ids):
+    """Takes a filepath to a FASTQ file and returns a new version of the file
+    which contains only reads with the specified ids"""
+    fastq = open(infile)
+    filtered_reads = StringIO.StringIO()
+
+    # iterate through each entry in R2
+    for i, read in enumerate(readfq(fastq)):
+        # save entry if it matches one filtered in R1
+        if read[ID] == read_ids[0]:
+            read_ids.pop(0)
+            fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
+            filtered_reads.write("\n".join(fastq_entry) + "\n")
+        # exit loop when all ids have been found
+        if len(read_ids) == 0:
+            break
+
+    # write matching paired-end reads to compressed fastq
+    fp = gzip.open(outfile + '.gz', 'wb')
+    filtered_reads.seek(0)
+    fp.write(filtered_reads.read())
+    filtered_reads.close()
+    fp.close()
+
 
 #--------------------------------------
 # Main
@@ -435,26 +470,7 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
 
     # For R1 reads, grab corresponding R2 entries
     print("Processing %s (mated pair)" % os.path.basename(input_mated_reads))
-
-    fastq = open(input_mated_reads)
-    mated_reads = StringIO.StringIO()
-
-    # iterate through each entry in R2
-    for i, read in enumerate(readfq(fastq)):
-        # save entry if it matches one filtered in R1
-        if read[ID] == read_ids[0]:
-            read_ids.pop(0)
-            fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
-            mated_reads.write("\n".join(fastq_entry) + "\n")
-        # exit loop when all ids have been found
-        if len(read_ids) == 0:
-            break
-
-    # write matching paired-end reads to compressed fastq
-    fp = gzip.open(output_mated_reads + '.gz', 'wb')
-    mated_reads.seek(0)
-    fp.write(mated_reads.read())
-    mated_reads.close()
+    filter_fastq(input_mated_reads, output_mated_reads, read_ids)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -470,11 +486,11 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     genome = os.path.splitext(args.genome)[0]
 
     # input read base directory
-    basedir = 'build/%s/fastq/%s/possible_sl_reads' % (subdir, hpgl_id)
+    basedir = 'build/%s/fastq/%s' % (subdir, hpgl_id)
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
-        r1_filepath = '%s/%s_R1_match_R1_with_sl.fastq.gz' % (basedir, hpgl_id)
+        r1_filepath = '%s/possible_sl_reads/%s_R1_match_R1_with_sl.fastq.gz' % (basedir, hpgl_id)
 
         # R2 filepath (for PE reads)
         r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
@@ -483,7 +499,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
             r2_filepath = ""
     # R2
     else:
-        r2_filepath = '%s/%s_R2_match_R2_with_sl.fastq.gz' % (basedir, hpgl_id)
+        r2_filepath = '%s/possible_sl_reads/%s_R2_match_R2_with_sl.fastq.gz' % (basedir, hpgl_id)
         r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
 
     # Map reads using Tophat
@@ -492,11 +508,25 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     ret = run_tophat(output_dir, genome, r1_filepath, r2_filepath,
                      extra_args='--mate-inner-dist 170 --no-mixed')
 
-    # Let Ruffus know we are done
-    if ret == 0:
-        open(output_file, 'w').close()
-    else:
+    # Make sure tophat succeeded
+    if ret != 0:
         print("Error running tophat!")
+        sys.exit()
+
+    # Get ids of actual SL-containing reads (those that failed to map when the
+    # SL sequence was included).
+    sam = pysam.Samfile(os.path.join(output_dir, 'unmapped.bam', 'rb'))
+    ids = [x.qname for x in samfile]
+
+    # create true hits directory
+    hits_dir = os.path.join(basedir, 'actual_sl_reads')
+    if not os.path.exists(hits_dir):
+        os.makedirs(hits_dir, mode=0o755)
+
+    # Let Ruffus know we are done
+    open(output_file, 'w').close()
+
+#@transform(remove_false_hits, )
 
 #@merge(parse_reads,
        #('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
