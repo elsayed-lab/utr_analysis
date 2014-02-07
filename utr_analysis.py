@@ -404,32 +404,23 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     if os.path.isfile(input_file.replace('_R1_', '_R2_')):
         paired_end = True
 
+        # matching reads
+        output_filename = '%s_%s_match' % (hpgl_id, read_num)
+        output_base = 'build/%s/fastq/%s/%s/%s' % (
+            subdir, hpgl_id, 'possible_sl_reads', output_filename
+        )
+
+        output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num)
+        output_without_sl = "%s_%s_without_sl.fastq" % (output_base, read_num)
+
+        output_mated_reads = "%s_%s.fastq" % (output_base, read_num)
+
         # Case 1: Left-read of PE reads
         if read_num == 'R1':
-            output_filename = '%s_R1_match' % (hpgl_id)
-            output_base = 'build/%s/fastq/%s/%s/%s' % (
-                subdir, hpgl_id, 'possible_sl_reads', output_filename
-            )
-
-            output_with_sl = "%s_R1_with_sl.fastq" % output_base
-            output_without_sl = "%s_R1_without_sl.fastq" % output_base
-
-            # mated reads
             input_mated_reads = input_file.replace("R1", "R2")
-            output_mated_reads = "%s_R2.fastq" % output_base
         else:
             # Case 2: Right-read of PE reads
-            output_filename = '%s_R2_match' % (hpgl_id)
-            output_base = 'build/%s/fastq/%s/%s/%s' % (
-                subdir, hpgl_id, 'possible_sl_reads', output_filename
-            )
-
-            output_with_sl = "%s_R2_with_sl.fastq" % output_base
-            output_without_sl = "%s_R2_without_sl.fastq" % output_base
-
-            # mated reads
             input_mated_reads = input_file.replace("R2", "R1")
-            output_mated_reads = "%s_R1.fastq" % output_base
     # Case 3: SE read
     else:
         paired_end = False
@@ -463,13 +454,10 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
 
     print("Finished processing %s" % os.path.basename(input_file))
 
-    # For single-end reads, stop here
-    if not paired_end:
-        return
-
     # For R1 reads, grab corresponding R2 entries
-    print("Processing %s (mated pair)" % os.path.basename(input_mated_reads))
-    filter_fastq(input_mated_reads, output_mated_reads, read_ids)
+    if paired_end:
+        print("Processing %s (mated pair)" % os.path.basename(input_mated_reads))
+        filter_fastq(input_mated_reads, output_mated_reads, read_ids)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
