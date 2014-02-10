@@ -59,6 +59,13 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
 #--------------------------------------
+# FASTQ row indices
+#--------------------------------------
+ID = 0
+SEQUENCE = 1
+QUALITY = 2
+
+#--------------------------------------
 # Non-Ruffus functions
 #--------------------------------------
 def parse_input():
@@ -214,9 +221,10 @@ def run_tophat(output_dir, genome, r1, r2="", num_threads=1,
         os.makedirs(output_dir, mode=0o755)
 
     # build command
-    tophat_cmd = ["tophat", "--num-threads", str(num_threads), 
-                  "--max-multihits", str(max_multihits)] + extra_args.split() + ["-o", output_dir, 
-                  genome, r1, r2]
+    tophat_cmd = (["tophat", "--num-threads", str(num_threads), 
+                   "--max-multihits",
+                   str(max_multihits)] + extra_args.split() +
+                   ["-o", output_dir, genome, r1, r2])
 
     # run tophat
     print(" ".join(tophat_cmd))
@@ -246,14 +254,23 @@ def gzip_str(filepath, strbuffer):
 def filter_fastq(infile, outfile, read_ids):
     """Takes a filepath to a FASTQ file and returns a new version of the file
     which contains only reads with the specified ids"""
-    fastq = open(infile)
+    if infile.endswith('.gz'):
+        fastq = gzip.open(infile, 'rb')
+    else:
+        fastq = open(infile)
+
     filtered_reads = StringIO.StringIO()
 
-    # iterate through each entry in R2
+    # normalize fastq ids and ignore right-part of id row, including the
+    # mated pair read number, during comparision
+    read_ids = [x.split()[0].strip('@') for x in read_ids]
+
+    # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq)):
-        # save entry if it matches one filtered in R1
-        if read[ID] == read_ids[0]:
-            read_ids.pop(0)
+        # save entry if it matches
+        #if read[ID].split()[0].strip('@') == read_ids[0]:
+        #    read_ids.pop(0)
+        if read[ID].split()[0].strip('@') in read_ids:
             fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
             filtered_reads.write("\n".join(fastq_entry) + "\n")
         # exit loop when all ids have been found
@@ -363,11 +380,6 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     # Keep track of matched read IDs
     read_ids = []
 
-    # FastQ entry indices
-    ID = 0
-    SEQUENCE = 1
-    QUALITY = 2
-
     # find all reads containing at least `min_length` bases of the feature
     # of interested
     for i, read in enumerate(readfq(fastq)):
@@ -395,41 +407,31 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
         reads_with_sl.write("\n".join(untrimmed_read) + "\n")
 
         # save id
-        if read_num == 'R1':
-            read_ids.append(read[ID].replace('1:N', '2:N'))
-        else:
-            read_ids.append(read[ID].replace('2:N', '1:N'))
+        read_ids.append(read[ID])
 
-    # Save matched fastq entries
+    # Paired-end reads
     if os.path.isfile(input_file.replace('_R1_', '_R2_')):
         paired_end = True
 
         # matching reads
-        output_filename = '%s_%s_match' % (hpgl_id, read_num)
-        output_base = 'build/%s/fastq/%s/%s/%s' % (
-            subdir, hpgl_id, 'possible_sl_reads', output_filename
+        output_base = 'build/%s/fastq/%s/possible_sl_reads/%s_%s_match' % (
+            subdir, hpgl_id, hpgl_id, read_num 
         )
-
         output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num)
         output_without_sl = "%s_%s_without_sl.fastq" % (output_base, read_num)
 
-        output_mated_reads = "%s_%s.fastq" % (output_base, read_num)
+        # mated reads
+        read_num_other = "R1" if read_num == "R2" else "R2"
+        input_mated_reads = input_file.replace(read_num, read_num_other)
+        output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other)
 
-        # Case 1: Left-read of PE reads
-        if read_num == 'R1':
-            input_mated_reads = input_file.replace("R1", "R2")
-        else:
-            # Case 2: Right-read of PE reads
-            input_mated_reads = input_file.replace("R2", "R1")
-    # Case 3: SE read
+    # Single-end reads
     else:
         paired_end = False
 
-        output_filename = '%s_R1' % (hpgl_id)
-        output_base = 'build/%s/fastq/%s/%s/%s' % (
-            subdir, hpgl_id, 'possible_sl_reads', output_filename
+        output_base = 'build/%s/fastq/%s/possible_sl_reads/%s_R1' % (
+            subdir, hpgl_id, hpgl_id
         )
-
         output_with_sl = "%s_with_sl.fastq" % output_base
         output_without_sl = "%s_without_sl.fastq" % output_base
 
@@ -454,7 +456,7 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
 
     print("Finished processing %s" % os.path.basename(input_file))
 
-    # For R1 reads, grab corresponding R2 entries
+    # For PE reads, grab reads from matching pair
     if paired_end:
         print("Processing %s (mated pair)" % os.path.basename(input_mated_reads))
         filter_fastq(input_mated_reads, output_mated_reads, read_ids)
@@ -467,8 +469,6 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
            r'\1/\2_\3.remove_false_hits',
            r'\2', r'\3')
 def remove_false_hits(input_file, output_file, hpgl_id, read_num):
-    #def run_tophat(output_dir, reference, r1, r2="", num_threads=8, 
-    #max_multihits=1, extra_args=""):
     output_dir = 'build/%s/tophat/%s/%s_false_hits' % (subdir, hpgl_id, read_num)
     genome = os.path.splitext(args.genome)[0]
 
@@ -477,16 +477,19 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
-        r1_filepath = '%s/possible_sl_reads/%s_R1_match_R1_with_sl.fastq.gz' % (basedir, hpgl_id)
+        r1_filepath = ('%s/possible_sl_reads/%s_R1_match_R1_with_sl.fastq.gz' %
+                       (basedir, hpgl_id))
 
         # R2 filepath (for PE reads)
         r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
 
+        # If SE, set filepath to empty string
         if not os.path.exists(r2_filepath):
             r2_filepath = ""
     # R2
     else:
-        r2_filepath = '%s/possible_sl_reads/%s_R2_match_R2_with_sl.fastq.gz' % (basedir, hpgl_id)
+        r2_filepath = ('%s/possible_sl_reads/%s_R2_match_R2_with_sl.fastq.gz' %
+                       (basedir, hpgl_id))
         r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
 
     # Map reads using Tophat
@@ -502,13 +505,27 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # Get ids of actual SL-containing reads (those that failed to map when the
     # SL sequence was included).
-    sam = pysam.Samfile(os.path.join(output_dir, 'unmapped.bam', 'rb'))
-    ids = [x.qname for x in samfile]
+    sam = pysam.Samfile(os.path.join(output_dir, 'unmapped.bam'), 'rb')
+    good_ids = [x.qname for x in sam]
 
-    # create true hits directory
+    # Create true hits directory
     hits_dir = os.path.join(basedir, 'actual_sl_reads')
     if not os.path.exists(hits_dir):
         os.makedirs(hits_dir, mode=0o755)
+
+    # Create filtered versions of R1 (and R2) fastq files with only the un-
+    # mapped reads
+
+    # Filter R1 reads
+    r1_infile = r1_filepath.replace('with_sl', 'without_sl')
+    r1_outfile = r1_infile.replace('possible', 'actual')
+    filter_fastq(r1_infile, r1_outfile, good_ids)
+
+    # Filter R2 reads
+    if r2_filepath != "":
+        r2_infile = r2_filepath.replace('with_sl', 'without_sl')
+        r2_outfile = r2_infile.replace('possible', 'actual')
+        filter_fastq(r2_infile, r2_outfile, good_ids)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -584,7 +601,6 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 # run pipeline
 if __name__ == "__main__":
     pipeline_run([remove_false_hits], verbose=True, multiprocess=8)
-    #pipeline_printout_graph("output/figures/utr_analysis_flowchart.png", "png",
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
                             [remove_false_hits])
 
