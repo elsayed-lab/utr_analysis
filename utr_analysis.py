@@ -263,14 +263,14 @@ def filter_fastq(infile, outfile, read_ids):
 
     # normalize fastq ids and ignore right-part of id row, including the
     # mated pair read number, during comparision
-    read_ids = [x.split()[0].strip('@') for x in read_ids]
+    read_ids = sorted([x.split()[0].strip('@') for x in read_ids])
 
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq)):
         # save entry if it matches
-        #if read[ID].split()[0].strip('@') == read_ids[0]:
-        #    read_ids.pop(0)
-        if read[ID].split()[0].strip('@') in read_ids:
+        #if read[ID].split()[0].strip('@') in read_ids:   # slow
+        if read[ID].split()[0].strip('@') == read_ids[0]:
+            read_ids.pop(0)
             fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
             filtered_reads.write("\n".join(fastq_entry) + "\n")
         # exit loop when all ids have been found
@@ -298,12 +298,15 @@ def setup():
                             'mismatches-%d' % args.num_mismatches,
                             'minlength-%d' % args.min_length)
 
-    # create directories
-    sub_dirs = ['fastq', 'tophat', 'ruffus']
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir, mode=0o755)
 
-    for d in [os.path.join(base_dir, subdir) for subdir in sub_dirs]:
-        if not os.path.exists(d):
-            os.makedirs(d, mode=0o755)
+    # create directories
+    #sub_dirs = ['fastq', 'tophat', 'ruffus']
+
+    #for d in [os.path.join(base_dir, subdir) for subdir in sub_dirs]:
+        #if not os.path.exists(d):
+            #os.makedirs(d, mode=0o755)
 
 #
 # Input regex explanation:
@@ -318,7 +321,7 @@ def setup():
 @follows(setup)
 @transform(args.input_reads,
            regex(r"^(.*/)?(HPGL[0-9]+)_(R[1-2])_(.+)\.fastq"),
-           r'build/%s/ruffus/\2_\3.parse_reads' % subdir,
+           r'build/%s/\2/ruffus/\2_\3.parse_reads' % subdir,
            r'\2', r'\3', r'\4',
            args.spliced_leader, args.min_length)
 def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
@@ -414,7 +417,7 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
         paired_end = True
 
         # matching reads
-        output_base = 'build/%s/fastq/%s/possible_sl_reads/%s_%s_match' % (
+        output_base = 'build/%s/%s/fastq/possible_sl_reads/%s_%s_match' % (
             subdir, hpgl_id, hpgl_id, read_num 
         )
         output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num)
@@ -429,7 +432,7 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     else:
         paired_end = False
 
-        output_base = 'build/%s/fastq/%s/possible_sl_reads/%s_R1' % (
+        output_base = 'build/%s/%s/fastq/possible_sl_reads/%s_R1' % (
             subdir, hpgl_id, hpgl_id
         )
         output_with_sl = "%s_with_sl.fastq" % output_base
@@ -469,11 +472,11 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
            r'\1/\2_\3.remove_false_hits',
            r'\2', r'\3')
 def remove_false_hits(input_file, output_file, hpgl_id, read_num):
-    output_dir = 'build/%s/tophat/%s/%s_false_hits' % (subdir, hpgl_id, read_num)
+    output_dir = 'build/%s/%s/tophat/%s_false_hits' % (subdir, hpgl_id, read_num)
     genome = os.path.splitext(args.genome)[0]
 
     # input read base directory
-    basedir = 'build/%s/fastq/%s' % (subdir, hpgl_id)
+    basedir = 'build/%s/%s/fastq' % (subdir, hpgl_id)
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
@@ -530,40 +533,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-#@transform(remove_false_hits, )
 
-#@merge(parse_reads,
-       #('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
-        #subdir))
-#def filter_reads(input_files, output_file):
-    #"""
-    #Loads reads from fastq files, filters them, and combined output (for
-    #now) into a single file.
-    #"""
-    ## write output
-    #with open(output_file, 'w') as fp:
-        ## add header comment
-        #header_comment = create_header_comment(
-            #os.path.basename(output_file),
-            #"""A collection of trimmed and filtered RNA-Seq reads containing at 
-             #least some portion of the UTR feature of interest in the correct 
-             #position. This file contains the combined results from all samples
-             #included in the analysis.""",
-            #args.author,
-            #args.email
-        #)
-        #fp.write(header_comment)
-
-        ## add header fields
-        #fp.write("id,sequence,start,end\n")
-
-        #for x in input_files:
-            #with open(x) as infile:
-                ## skip over commments and field names
-                #while infile.readline().startswith("#"):
-                    #continue
-                ## write rest of file contents
-                #fp.write(infile.read() + "\n")
 
 #@follows(filter_reads)
 #def compute_read_statistics():
