@@ -47,6 +47,7 @@ import glob
 import gzip
 import pysam
 import pandas
+import random
 import argparse
 import datetime
 import StringIO
@@ -263,16 +264,34 @@ def filter_fastq(infile, outfile, read_ids):
 
     # normalize fastq ids and ignore right-part of id row, including the
     # mated pair read number, during comparision
-    read_ids = sorted([x.split()[0].strip('@') for x in read_ids])
+    read_ids = [x.split()[0].strip('@') for x in read_ids]
+
+    # remove redundant entries
+    read_ids = list(set(read_ids))
+
+    # read ids may be semi-sorted which can be bad for indexing performance;
+    # shuffle to speed things up
+    random.shuffle(read_ids)
 
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq)):
-        # save entry if it matches
-        #if read[ID].split()[0].strip('@') in read_ids:   # slow
-        if read[ID].split()[0].strip('@') == read_ids[0]:
-            read_ids.pop(0)
+        # normalized entry id
+        fastq_id = read[ID].split()[0].strip('@')
+
+        # check to see if it is in the filtered list
+        try:
+            idx = read_ids.index(fastq_id)
+        except ValueError:
+            idx = None
+
+        # if it is, add to filtered output
+        if idx is not None:
             fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
             filtered_reads.write("\n".join(fastq_entry) + "\n")
+
+            # remove id from list to reduce search space in future iterations
+            read_ids.pop(idx)
+
         # exit loop when all ids have been found
         if len(read_ids) == 0:
             break
@@ -464,6 +483,11 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
         print("Processing %s (mated pair)" % os.path.basename(input_mated_reads))
         filter_fastq(input_mated_reads, output_mated_reads, read_ids)
 
+    # Create directory to keep track of Ruffus progress
+    ruffus_dir = os.path.join('build', subdir, hpgl_id, 'ruffus')
+    if not os.path.exists(ruffus_dir):
+        os.makedirs(ruffus_dir, mode=0o755)
+
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
@@ -534,6 +558,48 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     open(output_file, 'w').close()
 
 
+@transform(remove_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_false_hits'),
+           r'\1/\2_\3.map_sl_reads',
+           r'\2', r'\3')
+def map_sl_reads(input_file, output_file, hpgl_id, read_num):
+    """Maps the filtered spliced-leader containing reads back to the genome"""
+    output_dir = 'build/%s/%s/fastq/%s_sl_reads' % (subdir, hpgl_id, read_num)
+    genome = os.path.splitext(args.genome)[0]
+
+    # input read base directory
+    basedir = 'build/%s/%s/fastq' % (subdir, hpgl_id)
+
+    # R1 filepath (including matched SL sequence)
+    if (read_num == 'R1'):
+        r1_filepath = ('%s/possible_sl_reads/%s_R1_match_R1_with_sl.fastq.gz' %
+                       (basedir, hpgl_id))
+
+        # R2 filepath (for PE reads)
+        r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
+
+        # If SE, set filepath to empty string
+        if not os.path.exists(r2_filepath):
+            r2_filepath = ""
+    # R2
+    else:
+        r2_filepath = ('%s/possible_sl_reads/%s_R2_match_R2_with_sl.fastq.gz' %
+                       (basedir, hpgl_id))
+        r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
+
+    # Map reads using Tophat
+    # @TODO parameterize extra_args (except for --no-mixed in this case) to
+    # allow for easier customization
+    ret = run_tophat(output_dir, genome, r1_filepath, r2_filepath,
+                     extra_args='--mate-inner-dist 170 --no-mixed')
+
+    # Make sure tophat succeeded
+    if ret != 0:
+        print("Error running tophat!")
+        sys.exit()
+
+    # Let Ruffus know we are done
+    #open(output_file, 'w').close()
 
 #@follows(filter_reads)
 #def compute_read_statistics():
