@@ -247,8 +247,14 @@ def gzip_str(filepath, strbuffer):
     # go to beginning of string buffer
     strbuffer.seek(0)
 
+    # output path
+    if filepath.endswith('.gz'):
+        outfile = filepath
+    else:
+        outfile = filepath + '.gz'
+
     # write contents to a gzip-compressed file
-    fp = gzip.open(filepath + '.gz', 'wb')
+    fp = gzip.open(outfile, 'wb')
     fp.write(strbuffer.read())
     fp.close()
 
@@ -273,8 +279,15 @@ def filter_fastq(infile, outfile, read_ids):
     # shuffle to speed things up
     random.shuffle(read_ids)
 
+    print("Filtering fastq for %d matched reads" % len(read_ids))
+
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq)):
+        # TESTING
+        if i % 100000 == 0:
+            print("Processing read %d (%d remaining reads to find)" % (i,
+                len(read_ids)))
+
         # normalized entry id
         fastq_id = read[ID].split()[0].strip('@')
 
@@ -557,14 +570,13 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-
 @transform(remove_false_hits,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_false_hits'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
-    output_dir = 'build/%s/%s/fastq/%s_sl_reads' % (subdir, hpgl_id, read_num)
+    output_dir = 'build/%s/%s/tophat/%s_sl_reads' % (subdir, hpgl_id, read_num)
     genome = os.path.splitext(args.genome)[0]
 
     # input read base directory
@@ -572,7 +584,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
-        r1_filepath = ('%s/possible_sl_reads/%s_R1_match_R1_with_sl.fastq.gz' %
+        r1_filepath = ('%s/actual_sl_reads/%s_R1_match_R1_without_sl.fastq.gz' %
                        (basedir, hpgl_id))
 
         # R2 filepath (for PE reads)
@@ -583,15 +595,14 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
             r2_filepath = ""
     # R2
     else:
-        r2_filepath = ('%s/possible_sl_reads/%s_R2_match_R2_with_sl.fastq.gz' %
+        r2_filepath = ('%s/actual_sl_reads/%s_R2_match_R2_without_sl.fastq.gz' %
                        (basedir, hpgl_id))
         r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
 
     # Map reads using Tophat
-    # @TODO parameterize extra_args (except for --no-mixed in this case) to
-    # allow for easier customization
+    #  --no-mixed ?
     ret = run_tophat(output_dir, genome, r1_filepath, r2_filepath,
-                     extra_args='--mate-inner-dist 170 --no-mixed')
+                     extra_args='--mate-inner-dist 170')
 
     # Make sure tophat succeeded
     if ret != 0:
@@ -599,7 +610,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
         sys.exit()
 
     # Let Ruffus know we are done
-    #open(output_file, 'w').close()
+    open(output_file, 'w').close()
 
 #@follows(filter_reads)
 #def compute_read_statistics():
@@ -636,7 +647,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
 # run pipeline
 if __name__ == "__main__":
-    pipeline_run([remove_false_hits], verbose=True, multiprocess=8)
+    pipeline_run([map_sl_reads], verbose=False, multiprocess=8)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
-                            [remove_false_hits])
+                            [map_sl_reads])
 
