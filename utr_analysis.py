@@ -26,6 +26,8 @@ TODO
     - total number of reads (or number of reads mapped to pathogen)
     - number of reads remaining after filtering (reads containing SL)
     - distribution of SL fragment lengths
+    - distribution of UTR lengths
+    - average number of accepter sites per CDS
 - Compare above statistics across samples
 - Adding logging (use logging module)
 - PBS support
@@ -55,6 +57,7 @@ import textwrap
 import jellyfish
 import subprocess
 from ruffus import *
+from BCBio import GFF
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -207,6 +210,30 @@ def sort_and_index(base_output, num_threads=1):
     index_cmd = ['samtools', 'index', base_output + '_sorted.bam']
     print(" ".join(index_cmd))
     subprocess.call(index_cmd)
+
+#def add_sam_header(filepath, description, author, email, cmd):
+    #"""Adds a header to a sam file including some information about how the
+    #file was generated, along with some other basic information."""
+    #template=textwrap.dedent(""" 
+    #@CO File:   %s
+    #@CO Author: %s
+    #@CO Email:  %s
+    #@CO Date:   %s UT
+    #@CO Description: %s
+    #""").lstrip()
+
+    ## format description
+    #desc_raw = " ".join(description.split())
+    #desc_processed = "\n@CO ".join(textwrap.wrap(desc_raw, 78))
+
+    ## format command
+    #command_parts = textwrap.wrap(cmd, 75)
+    #command_parts = [x.ljust(75) + " \\" for x in command_parts]
+    #command = "\n@CO ".join(["\n@CO"] + command_parts)
+
+    #return template % (filename, author, email, datetime.datetime.utcnow(),
+                       #desc_processed, command)
+
 
 def run_tophat(output_dir, genome, r1, r2="", num_threads=1, 
                max_multihits=20, extra_args=""):
@@ -612,6 +639,86 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
+@collate(map_sl_reads,
+       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
+       r'\1/\2_.compute_coordinates',
+       r'\2')
+def compute_coordinates(input_files, output_file, hpgl_id):
+    """Maps the filtered spliced-leader containing reads back to the genome.
+
+    References
+    ----------
+    * http://www.cgat.org/~andreas/documentation/pysam/api.html#pysam.Samfile
+    * http://biopython.org/wiki/GFF_Parsing
+    * http://biopython.org/DIST/docs/api/Bio.SeqFeature.SeqFeature-class.html
+    """
+    print("Compute coordinates %s" % (hpgl_id))
+
+    # load GFF
+    gff_fp = open(args.gff)
+
+    # Get chromosomes from GFF file
+    chromosomes = {}
+    for rec in GFF.parse(gff_fp):
+        if rec.id.startswith('TcChr'):
+            chromosomes[int(rec.id[5:-2])] = rec
+
+    # @TODO: find CDS within 1000bp of location
+    # Example: ch13:15000
+    #features = chromosomes[13][14000:16000].features
+    #genes = [x for x in features if x.type =='gene']
+
+    # Create a dictionary to keep track of the splice acceptor site
+    # locations and frequencies
+    # A nested dictionary will be used such that a given SL site can be
+    # indexed using the syntax:
+    # results[chr_num][gene_id][acceptor_site_offset]
+    results = {}
+
+    # Output filepath
+    coordinates_output = 'build/%s/output.csv' % (subdir)
+    fp = open(coordinates_output, 'w')
+    #writer = csv.writer(fp)
+
+    # Bam inputs
+    input_globstr = 'build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam'
+
+    # Itereate over mapped reads
+    for filepath in glob.glob(input_globstr):
+        sam = pysam.Samfile(filepath, 'rb')
+
+        # Get coordinate and strand for each read in bam file
+        for read in sam:
+            coordinate = read.pos
+            chromosome = int(sam.getrname(read.tid)[5:-2])
+            strand = -1 if read.is_reverse else 1
+
+            # Find nearest gene
+            # 1. Get genes within +/- N bases of location (if any)
+            # 2. Find closest match
+
+            # @TODO: implement above -- for now, just adding a placeholder.
+            gene_id = 'fake_gene'
+
+            # Add to output dictionary
+            if not chromosome in results:
+                results[chromosome] = {}
+            if not gene_id in results[chromosome]:
+                results[chromosome][gene_id] = {}
+
+            # Increment SL site count
+            if not acceptor_site in results[chromosome][gene_id]:
+                results[chromosome][gene_id][acceptor_site] = 1
+            else:
+                results[chromosome][gene_id][acceptor_site] += 1
+
+    # create a csv.DictWriter instance and write output
+
+    # clean up
+    gff_fp.close()
+    fp.close()
+
+
 #@follows(filter_reads)
 #def compute_read_statistics():
     #"""Computes some basic stats about the distribution of the UTR feature
@@ -647,7 +754,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
 # run pipeline
 if __name__ == "__main__":
-    pipeline_run([map_sl_reads], verbose=False, multiprocess=8)
+    pipeline_run([compute_coordinates], verbose=False, multiprocess=8)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
-                            [map_sl_reads])
+                            [compute_coordinates])
 

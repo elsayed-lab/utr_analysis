@@ -10,7 +10,7 @@
 # processing pipeline.
 
 # Settings
-N=1500
+N=135000
 INPUT=$RAW/tcruzir21/HPGL0258/processed/HPGL0258_R1_combined.filtered.fastq
 INTERMEDIATE="random_ids.$N"
 OUTPUT=grep_test.fastq
