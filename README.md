@@ -1,7 +1,16 @@
-UTR analysis pipeline
+UTR Analysis Pipeline
+=====================
 
-Overview
---------
+Status: IN DEVELOPMENT
+
+## Overview
+
+Pipeline for analyzing a set of RNA-Seq reads to determine 5' and
+3'UTR structure including the locations of all spliced leader acceptor sites
+and poly-A tail acceptor sites.
+
+The pipeline makes use of Tophat for mapping reads, and Ruffus for pipeline
+flow management.
 
 ## Input
 

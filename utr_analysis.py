@@ -52,7 +52,6 @@ import argparse
 import datetime
 import StringIO
 import textwrap
-import jellyfish
 import subprocess
 from ruffus import *
 from BCBio import GFF
@@ -656,15 +655,11 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     gff_fp = open(args.gff)
 
     # Get chromosomes from GFF file
+    # @TODO: Generalize for other species
     chromosomes = {}
     for rec in GFF.parse(gff_fp):
         if rec.id.startswith('TcChr'):
             chromosomes[int(rec.id[5:-2])] = rec
-
-    # @TODO: find CDS within 1000bp of location
-    # Example: ch13:15000
-    #features = chromosomes[13][14000:16000].features
-    #genes = [x for x in features if x.type =='gene']
 
     # Create a dictionary to keep track of the splice acceptor site
     # locations and frequencies
@@ -674,7 +669,7 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     results = {}
 
     # Bam inputs
-    nput_globstr = ('build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
+    input_globstr = ('build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
                      subdir)
 
     # Itereate over mapped reads
@@ -695,11 +690,13 @@ def compute_coordinates(input_files, output_file, hpgl_id):
                 # of splice-site for genes
                 subseq = chromosomes[chromosome][pos:pos + 1000]
                 gene_start = 'start'
+                offset = 0
             else:
                 # For negative-strand sites, search region just upstream
                 # of splice-site for genes
-                subseq = chromosomes[chromosome][pos - 100:pos]
+                subseq = chromosomes[chromosome][pos - 1000:pos]
                 gene_start = 'end'
+                offset = 1000
 
             # If there are no nearby genes, stop here
             if len(subseq.features) == 0:
@@ -710,7 +707,8 @@ def compute_coordinates(input_files, output_file, hpgl_id):
             closest_dist = float('inf')
 
             for f in subseq.features:
-                dist = abs(int(getattr(f.location, gene_start)) - pos)
+                #dist = abs(int(getattr(f.location, gene_start)) - pos)
+                dist = abs(offset - int(getattr(f.location, gene_start)))
                 if dist < closest_dist:
                     closest_gene = f.id
                     closest_dist = dist
@@ -737,19 +735,19 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     # Write csv header
     header = create_header_comment(os.path.basename(coordinates_output),
                                    "Spliced leader acceptor site coordinates",
-                                   args.author, args.email))
+                                   args.author, args.email)
     fp.write(header)
 
     # Write header to output
     writer = csv.writer(fp)
-    writer.writerow(['chromosome', 'gene', 'location', 'distance', 'count'])
+    writer.writerow(['gene', 'chromosome', 'location', 'distance', 'count'])
 
     # write output to csv
     for chrnum in results:
         for gene_id in results[chrnum]:
             for acceptor_site in results[chrnum][gene_id]:
                 writer.writerow([
-                    chrnum, gene_id, acceptor_site,
+                    gene_id, chrnum, acceptor_site,
                     results[chrnum][gene_id][acceptor_site]['dist'],
                     results[chrnum][gene_id][acceptor_site]['count']
                 ])
