@@ -1,5 +1,4 @@
-UTR analysis
-2013/12/12
+UTR analysis pipeline
 
 Overview
 --------
@@ -10,13 +9,6 @@ Overview
 - Genome sequence (fasta)
 - Genome annotation including CDS coordinates (gff)
 - Spliced leader sequence (for 5'UTR/SL analysis)
-
-
-QUESTION 2013/12/19:
-
-For each n-base suffix of the SL, how often does that suffix occur when
-searched for unanchored? What is the influence on the left-anchored search
-results?
 
 ## Goals
 
@@ -66,36 +58,13 @@ fold into a 3 stem-loop structure, possibly with varying configurations
 
 SL = SL exon = SL mini-exon
 
-#### T. cruzi (Yuan; McCarthy-Burke et al; 1989)
+#### T. cruzi (McCarthy-Burke et al; 1989)
 
-http://www.ncbi.nlm.nih.gov/nucleotide/20977244?report=genbank&log$=nuclalign&blast_rank=34&RID=ASXAKGE901R
-
-# AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG
 > AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
-      AACGCTATTATTGATACAGTTTCTGTACTATATTG
 
 #### L. major (Rastrojo et al. 2013)
 
-> AACTAACGCT ATATAAGTAT CAGTTTCTGT ACTTTATTG
-
-### Comparison
-
-T. cruzi    AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
-             ||||||||||||||||||||||||||||||||||||||
-L. major     ACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
-
-
-### Gene structure (after trans-splicing)
-
-    [SL](---5'UTR---)[CDS](---3'UTR---)[PolyA tail]
-
-## Illumina RNA-Seq
-
-### RNA-Seq paired end reads
-
-    [100bp]--(~200-400bp)--[100bp]
-
-     between 98-100
+> AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG
 
 References
 ----------

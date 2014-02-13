@@ -3,7 +3,6 @@
 """
 Utranslated Region (UTR) analysis
 Keith Hughitt
-2013/12/15
 
 Overview
 --------
@@ -30,7 +29,6 @@ TODO
     - average number of accepter sites per CDS
 - Compare above statistics across samples
 - Adding logging (use logging module)
-- PBS support
 
 Testing
 -------
@@ -675,13 +673,9 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     # results[chr_num][gene_id][acceptor_site_offset]
     results = {}
 
-    # Output filepath
-    coordinates_output = 'build/%s/output.csv' % (subdir)
-    fp = open(coordinates_output, 'w')
-    #writer = csv.writer(fp)
-
     # Bam inputs
-    input_globstr = 'build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam'
+    nput_globstr = ('build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
+                     subdir)
 
     # Itereate over mapped reads
     for filepath in glob.glob(input_globstr):
@@ -689,35 +683,80 @@ def compute_coordinates(input_files, output_file, hpgl_id):
 
         # Get coordinate and strand for each read in bam file
         for read in sam:
-            coordinate = read.pos
+            pos = read.pos
             chromosome = int(sam.getrname(read.tid)[5:-2])
             strand = -1 if read.is_reverse else 1
 
             # Find nearest gene
             # 1. Get genes within +/- N bases of location (if any)
             # 2. Find closest match
+            if strand == 1:
+                # For positive-strand sites, search region just downstream 
+                # of splice-site for genes
+                subseq = chromosomes[chromosome][pos:pos + 1000]
+                gene_start = 'start'
+            else:
+                # For negative-strand sites, search region just upstream
+                # of splice-site for genes
+                subseq = chromosomes[chromosome][pos - 100:pos]
+                gene_start = 'end'
 
-            # @TODO: implement above -- for now, just adding a placeholder.
-            gene_id = 'fake_gene'
+            # If there are no nearby genes, stop here
+            if len(subseq.features) == 0:
+                continue
+
+            # Otherwise find closest gene to the acceptor site
+            closest_gene = None
+            closest_dist = float('inf')
+
+            for f in subseq.features:
+                dist = abs(int(getattr(f.location, gene_start)) - pos)
+                if dist < closest_dist:
+                    closest_gene = f.id
+                    closest_dist = dist
 
             # Add to output dictionary
             if not chromosome in results:
                 results[chromosome] = {}
-            if not gene_id in results[chromosome]:
-                results[chromosome][gene_id] = {}
+            if not closest_gene in results[chromosome]:
+                results[chromosome][closest_gene] = {}
 
-            # Increment SL site count
-            if not acceptor_site in results[chromosome][gene_id]:
-                results[chromosome][gene_id][acceptor_site] = 1
+            # Increment SL site count and save distance from gene
+            if not pos in results[chromosome][closest_gene]:
+                results[chromosome][closest_gene][pos] = {
+                    "count": 1,
+                    "dist": closest_dist
+                }
             else:
-                results[chromosome][gene_id][acceptor_site] += 1
+                results[chromosome][closest_gene][pos]['count'] += 1
 
-    # create a csv.DictWriter instance and write output
+    # Output filepath
+    coordinates_output = 'build/%s/output.csv' % (subdir)
+    fp = open(coordinates_output, 'w')
+
+    # Write csv header
+    header = create_header_comment(os.path.basename(coordinates_output),
+                                   "Spliced leader acceptor site coordinates",
+                                   args.author, args.email))
+    fp.write(header)
+
+    # Write header to output
+    writer = csv.writer(fp)
+    writer.writerow(['chromosome', 'gene', 'location', 'distance', 'count'])
+
+    # write output to csv
+    for chrnum in results:
+        for gene_id in results[chrnum]:
+            for acceptor_site in results[chrnum][gene_id]:
+                writer.writerow([
+                    chrnum, gene_id, acceptor_site,
+                    results[chrnum][gene_id][acceptor_site]['dist'],
+                    results[chrnum][gene_id][acceptor_site]['count']
+                ])
 
     # clean up
     gff_fp.close()
     fp.close()
-
 
 #@follows(filter_reads)
 #def compute_read_statistics():

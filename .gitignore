@@ -1,5 +1,7 @@
 *~
-build
-.ruffus_history.sqlite
 *.pyc
+*.png
+.ruffus_history.sqlite
+build
+scripts
 igv_session.xml
