@@ -101,6 +101,12 @@ def parse_input():
                         help='Genome annotation GFF')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader', 
                         help='Spliced leader DNA sequence')
+    parser.add_argument('-l', '--left-anchor-reads', dest='anchor_left',
+                        help=('Require sequence of interest to be at left'
+                              'side of read'), action='store_true')
+    parser.add_argument('-r', '--right-anchor-reads', dest='anchor_right',
+                        help=('Require sequence of interest to be at right'
+                              'side of read'), action='store_true')
     parser.add_argument('-m', '--min-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-n', '--num-mismatches', default=0, type=int,
@@ -307,11 +313,6 @@ def filter_fastq(infile, outfile, read_ids):
 
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq)):
-        # TESTING
-        if i % 100000 == 0:
-            print("Processing read %d (%d remaining reads to find)" % (i,
-                len(read_ids)))
-
         # normalized entry id
         fastq_id = read[ID].split()[0].strip('@')
 
@@ -411,6 +412,15 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     # limit to matches of size min_length or greater
     suffix = spliced_leader[-min_length:]
 
+    # Regex position anchors (optional)
+    re_prefix = ""
+    re_suffix = ""
+
+    if args.anchor_left:
+        re_prefix="^"
+    if args.anchor_right:
+        re_suffix="$"
+
     # To speed things up, we first filter the reads to find all possible hits
     # by grepping for reads containing at least `min_length` bases of the SL 
     # sequence.
@@ -423,10 +433,11 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     # speeds things up significantly generally should not result in many real
     # SL hits from being removed.
     if args.num_mismatches == 0:
-        regex = re.compile(suffix)
+        regex = re.compile(re_prefix + suffix + re_suffix)
     else:
-        regex = re.compile('|'.join('%s.%s' % (suffix[:i], suffix[i+1:])
-                           for i in range(len(suffix))))
+        regex = re.compile('|'.join("%s%s.%s%s" % (
+            re_prefix, suffix[:i], suffix[i+1:], re_suffix
+        ) for i in range(len(suffix))))
 
     # open fastq file
     fastq = open(input_file)
@@ -688,15 +699,15 @@ def compute_coordinates(input_files, output_file, hpgl_id):
             if strand == 1:
                 # For positive-strand sites, search region just downstream 
                 # of splice-site for genes
-                subseq = chromosomes[chromosome][pos:pos + 1000]
+                subseq = chromosomes[chromosome][pos:pos + 10000]
                 gene_start = 'start'
                 offset = 0
             else:
                 # For negative-strand sites, search region just upstream
                 # of splice-site for genes
-                subseq = chromosomes[chromosome][pos - 1000:pos]
+                subseq = chromosomes[chromosome][pos - 10000:pos]
                 gene_start = 'end'
-                offset = 1000
+                offset = 10000
 
             # If there are no nearby genes, stop here
             if len(subseq.features) == 0:
