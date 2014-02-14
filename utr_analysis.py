@@ -351,31 +351,29 @@ if args.anchor_left:
 if args.anchor_right:
     subdir = os.path.join(subdir, 'anchor-right')
 
+# create subdirs based on matching parameters
+base_dir = os.path.join('build', subdir)
+
+if not os.path.exists(base_dir):
+    os.makedirs(base_dir, mode=0o755)
+
 # setup master logger
-logging.basicConfig(filename=os.path.join(subdir, 'build.log'),
+logging.basicConfig(filename=os.path.join(base_dir, 'build.log'),
+                    level=logging.INFO,
                     format='%(asctime)s %(message)s',
                     datefmt='%Y-%m-%d %I:%M:%S %p')
+# log to console as well
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+logging.getLogger('').addHandler(console)
+
+logging.info("Starting UTR Analysis")
+logging.info("Python %s" % sys.version)
+logging.info("Command used: %s" % " ".join(sys.argv))
 
 #--------------------------------------
 # Ruffus tasks
 #--------------------------------------
-def setup():
-    """Create working directories, etc."""
-    # create subdirs based on matching parameters
-    base_dir = os.path.join('build',
-                            'mismatches-%d' % args.num_mismatches,
-                            'minlength-%d' % args.min_length)
-
-    if not os.path.exists(base_dir):
-        os.makedirs(base_dir, mode=0o755)
-
-    # create directories
-    #sub_dirs = ['fastq', 'tophat', 'ruffus']
-
-    #for d in [os.path.join(base_dir, subdir) for subdir in sub_dirs]:
-        #if not os.path.exists(d):
-            #os.makedirs(d, mode=0o755)
-
 #
 # Input regex explanation:
 #
@@ -386,7 +384,6 @@ def setup():
 # \3 - R1/R2
 # \4 - _anything_else_before_ext
 #
-@follows(setup)
 @transform(args.input_reads,
            regex(r"^(.*/)?(HPGL[0-9]+)_(R[1-2])_(.+)\.fastq"),
            r'build/%s/\2/ruffus/\2_\3.parse_reads' % subdir,
@@ -452,7 +449,7 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
 
     # open fastq file
     fastq = open(input_file)
-    logging.info("Processing %s" % os.path.basename(input_file))
+    print("Processing %s" % os.path.basename(input_file))
 
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
@@ -535,11 +532,11 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     reads_without_sl.close()
     reads_with_sl.close()
 
-    logging.info("Finished processing %s" % os.path.basename(input_file))
+    print("Finished processing %s" % os.path.basename(input_file))
 
     # For PE reads, grab reads from matching pair
     if paired_end:
-        logging.info(("Processing %s (mated pair)" % 
+        print(("Processing %s (mated pair)" % 
                       os.path.basename(input_mated_reads)))
         filter_fastq(input_mated_reads, output_mated_reads, read_ids)
 
@@ -819,8 +816,8 @@ def compute_coordinates(input_files, output_file, hpgl_id):
 
 # run pipeline
 if __name__ == "__main__":
-    pipeline_run([compute_coordinates], logger=logging.getLogger(),
+    pipeline_run([compute_coordinates], logger=logging.getLogger(''),
                  multiprocess=8)
-    pipeline_printout_graph("utr_analysis_flowchart.jpg", "jpg",
+    pipeline_printout_graph("utr_analysis_flowchart.png", "png",
                             [compute_coordinates])
 
