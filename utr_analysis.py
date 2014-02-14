@@ -48,6 +48,7 @@ import gzip
 import pysam
 import pandas
 import random
+import logging
 import argparse
 import datetime
 import StringIO
@@ -129,7 +130,6 @@ def parse_input():
         args.author = os.getlogin()
 
     # @TODO Validate input
-
     return args
 
 def readfq(fp):
@@ -341,9 +341,20 @@ def filter_fastq(infile, outfile, read_ids):
 #--------------------------------------
 # Main
 #--------------------------------------
+
+# parse input
 args = parse_input()
 subdir = os.path.join('mismatches-%d' % args.num_mismatches,
                       'minlength-%d' % args.min_length)
+if args.anchor_left:
+    subdir = os.path.join(subdir, 'anchor-left')
+if args.anchor_right:
+    subdir = os.path.join(subdir, 'anchor-right')
+
+# setup master logger
+logging.basicConfig(filename=os.path.join(subdir, 'build.log'),
+                    format='%(asctime)s %(message)s',
+                    datefmt='%Y-%m-%d %I:%M:%S %p')
 
 #--------------------------------------
 # Ruffus tasks
@@ -441,7 +452,7 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
 
     # open fastq file
     fastq = open(input_file)
-    print("Processing %s" % os.path.basename(input_file))
+    logging.info("Processing %s" % os.path.basename(input_file))
 
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
@@ -524,11 +535,12 @@ def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
     reads_without_sl.close()
     reads_with_sl.close()
 
-    print("Finished processing %s" % os.path.basename(input_file))
+    logging.info("Finished processing %s" % os.path.basename(input_file))
 
     # For PE reads, grab reads from matching pair
     if paired_end:
-        print("Processing %s (mated pair)" % os.path.basename(input_mated_reads))
+        logging.info(("Processing %s (mated pair)" % 
+                      os.path.basename(input_mated_reads)))
         filter_fastq(input_mated_reads, output_mated_reads, read_ids)
 
     # Create directory to keep track of Ruffus progress
@@ -575,7 +587,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # Make sure tophat succeeded
     if ret != 0:
-        print("Error running tophat!")
+        logging.error("Error running tophat 1/2! %s (%s)" % hpgl_id, read_num)
         sys.exit()
 
     # Get ids of actual SL-containing reads (those that failed to map when the
@@ -637,11 +649,11 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     # Map reads using Tophat
     #  --no-mixed ?
     ret = run_tophat(output_dir, genome, r1_filepath, r2_filepath,
-                     extra_args='--mate-inner-dist 170')
+                 extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
 
     # Make sure tophat succeeded
     if ret != 0:
-        print("Error running tophat!")
+        logging.error("Error running tophat 2/2! %s (%s)" % hpgl_id, read_num)
         sys.exit()
 
     # Let Ruffus know we are done
@@ -660,8 +672,6 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     * http://biopython.org/wiki/GFF_Parsing
     * http://biopython.org/DIST/docs/api/Bio.SeqFeature.SeqFeature-class.html
     """
-    print("Compute coordinates %s" % (hpgl_id))
-
     # load GFF
     gff_fp = open(args.gff)
 
@@ -682,6 +692,12 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     # Bam inputs
     input_globstr = ('build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
                      subdir)
+
+    # TESTING 2014/02/13
+    # Let's see what is not matching
+    not_matched = 'build/%s/no_matches.csv' % (subdir)
+    debug_writer = csv.writer(open(not_matched, 'w'))
+    debug_writer.writerow(['read_id', 'chromosome', 'strand', 'position'])
 
     # Itereate over mapped reads
     for filepath in glob.glob(input_globstr):
@@ -711,6 +727,7 @@ def compute_coordinates(input_files, output_file, hpgl_id):
 
             # If there are no nearby genes, stop here
             if len(subseq.features) == 0:
+                debug_writer.writerow([read.qname, chromosome, strand, pos])
                 continue
 
             # Otherwise find closest gene to the acceptor site
@@ -802,7 +819,8 @@ def compute_coordinates(input_files, output_file, hpgl_id):
 
 # run pipeline
 if __name__ == "__main__":
-    pipeline_run([compute_coordinates], verbose=False, multiprocess=8)
-    pipeline_printout_graph("utr_analysis_flowchart.png", "png",
+    pipeline_run([compute_coordinates], logger=logging.getLogger(),
+                 multiprocess=8)
+    pipeline_printout_graph("utr_analysis_flowchart.jpg", "jpg",
                             [compute_coordinates])
 
