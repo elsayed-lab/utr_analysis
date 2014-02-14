@@ -367,9 +367,11 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger('').addHandler(console)
 
+logging.info("#" * 80 + "\n")
 logging.info("Starting UTR Analysis")
 logging.info("Python %s" % sys.version)
-logging.info("Command used: %s" % " ".join(sys.argv))
+logging.info("%s" % " ".join(sys.argv))
+logging.info("#" * 80 + "\n")
 
 #--------------------------------------
 # Ruffus tasks
@@ -381,16 +383,17 @@ logging.info("Command used: %s" % " ".join(sys.argv))
 #
 # \1 - directory
 # \2 - HPGLxxxx
-# \3 - R1/R2
-# \4 - _anything_else_before_ext
+# \3 - _anything_between_id_and_read_num_
+# \4 - R1/R2
+# \5 - _anything_after_read_num_
 #
 @transform(args.input_reads,
-           regex(r"^(.*/)?(HPGL[0-9]+)_(R[1-2])_(.+)\.fastq"),
-           r'build/%s/\2/ruffus/\2_\3.parse_reads' % subdir,
-           r'\2', r'\3', r'\4',
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           r'build/%s/\2/ruffus/\2_\4.parse_reads' % subdir,
+           r'\2', r'\3', r'\4', r'\5',
            args.spliced_leader, args.min_length)
-def parse_reads(input_file, output_file, hpgl_id, read_num, file_suffix,
-                spliced_leader, min_length):
+def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num, 
+                file_suffix, spliced_leader, min_length):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing the feature of interest (SL or polyA tail).
