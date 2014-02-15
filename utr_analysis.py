@@ -83,7 +83,7 @@ def parse_input():
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
         -f TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
         -g TrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff             \\
-        -m 12 -n 3
+        --build-directory tcruzi -m 12 -n 3
     """)
 
     # Create ArgumentParser instance
@@ -96,12 +96,14 @@ def parse_input():
     # Add arguments
     parser.add_argument('-i', '--input-reads', required=True,
                         help='RNA-Seq FASTQ glob string')
+    parser.add_argument('-d', '--build-directory', required=True,
+                        help='Top-level build directory name to use.')
     parser.add_argument('-f', '--fasta-genome', dest='genome', required=True,
                         help='Genome sequence FASTA filepath')
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
                         help='Genome annotation GFF')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader', 
-                        help='Spliced leader DNA sequence')
+                        help='Spliced leader DNA sequence', default=None)
     parser.add_argument('-l', '--left-anchor-reads', dest='anchor_left',
                         help=('Require sequence of interest to be at left'
                               'side of read'), action='store_true')
@@ -345,9 +347,17 @@ def filter_fastq(infile, outfile, read_ids):
 # parse input
 args = parse_input()
 
+# analysis type (sl/poly-a)
+analysis_type = ('spliced_leader' if args.spliced_leader is not None else
+                 'poly-a')
+
 # create a unique build path for specified parameters
-subdir = os.path.join('mismatches-%d' % args.num_mismatches,
-                      'minlength-%d' % args.min_length)
+subdir = os.path.join(
+    args.build_directory,
+    analysis_type,
+    'mismatches-%d' % args.num_mismatches,
+    'minlength-%d' % args.min_length
+)
 if args.anchor_left:
     subdir = os.path.join(subdir, 'anchor-left')
 if args.anchor_right:
