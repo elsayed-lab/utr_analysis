@@ -207,11 +207,11 @@ def sort_and_index(base_output, num_threads=1):
     """Sorts and indexes .bam files using samtools"""
     sort_cmd = ['samtools', 'sort', '-@', str(num_threads), 
                 base_output + ".bam", base_output + "_sorted"]
-    print(" ".join(sort_cmd))
+    loggers[hpgl_id].info(" ".join(sort_cmd))
     subprocess.call(sort_cmd)
 
     index_cmd = ['samtools', 'index', base_output + '_sorted.bam']
-    print(" ".join(index_cmd))
+    loggers[hpgl_id].info(" ".join(index_cmd))
     subprocess.call(index_cmd)
 
 #def add_sam_header(filepath, description, author, email, cmd):
@@ -258,7 +258,7 @@ def run_tophat(output_dir, genome, r1, r2="", num_threads=1,
                    ["-o", output_dir, genome, r1, r2])
 
     # run tophat
-    print(" ".join(tophat_cmd))
+    loggers[hpgl_id].info(" ".join(tophat_cmd))
     ret = subprocess.call(tophat_cmd)
 
     # check to see if tophat succeeded
@@ -309,7 +309,7 @@ def filter_fastq(infile, outfile, read_ids):
     # shuffle to speed things up
     random.shuffle(read_ids)
 
-    print("Filtering fastq for %d matched reads" % len(read_ids))
+    loggers[hpgl_id].info("Filtering fastq for %d matched reads" % len(read_ids))
 
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq)):
@@ -344,6 +344,8 @@ def filter_fastq(infile, outfile, read_ids):
 
 # parse input
 args = parse_input()
+
+# create a unique build path for specified parameters
 subdir = os.path.join('mismatches-%d' % args.num_mismatches,
                       'minlength-%d' % args.min_length)
 if args.anchor_left:
@@ -351,17 +353,36 @@ if args.anchor_left:
 if args.anchor_right:
     subdir = os.path.join(subdir, 'anchor-right')
 
+# get a list of HPGL ids
+input_regex = re.compile(r'.*(HPGL[0-9]+).*')
+hpgl_ids = []
+
+for filename in glob.glob(args.input_reads):
+    hpgl_id = re.match(input_regex, filename).groups()[0]
+    if hpgl_id not in hpgl_ids:
+        hpgl_ids.append(hpgl_id)
+
 # create subdirs based on matching parameters
 base_dir = os.path.join('build', subdir)
 
-if not os.path.exists(base_dir):
-    os.makedirs(base_dir, mode=0o755)
+for hpgl_id in hpgl_ids:
+    # create build directories
+    build_dir = os.path.join('build', subdir, hpgl_id)
+
+    for d in ['fastq', 'ruffus', 'tophat']:
+        if not os.path.exists(os.path.join(build_dir, d)):
+            os.makedirs(os.path.join(build_dir, d), mode=0o755)
 
 # setup master logger
+log_format = '%(asctime)s %(message)s'
+date_format = '%Y-%m-%d %I:%M:%S %p'
+formatter = logging.Formatter(log_format, datefmt=date_format)
+
 logging.basicConfig(filename=os.path.join(base_dir, 'build.log'),
                     level=logging.INFO,
-                    format='%(asctime)s %(message)s',
-                    datefmt='%Y-%m-%d %I:%M:%S %p')
+                    format=log_format,
+                    datefmt=date_format)
+
 # log to console as well
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
@@ -372,6 +393,18 @@ logging.info("Starting UTR Analysis")
 logging.info("Python %s" % sys.version)
 logging.info("%s" % " ".join(sys.argv))
 logging.info("#" * 80 + "\n")
+
+# create dictionary of log handlers for sample-specific info
+loggers = {}
+
+# setup sample-specific loggers
+for hpgl_id in hpgl_ids:
+    build_dir = os.path.join('build', subdir, hpgl_id)
+    log_file = os.path.join(build_dir, '%s.log' % hpgl_id)
+    loggers[hpgl_id] = logging.getLogger(hpgl_id)
+    handler = logging.FileHandler(log_file)
+    handler.setFormatter(formatter)
+    loggers[hpgl_id].addHandler(handler)
 
 #--------------------------------------
 # Ruffus tasks
@@ -444,15 +477,19 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     # speeds things up significantly generally should not result in many real
     # SL hits from being removed.
     if args.num_mismatches == 0:
-        regex = re.compile(re_prefix + suffix + re_suffix)
+        read_regex = re.compile(re_prefix + suffix + re_suffix)
     else:
-        regex = re.compile('|'.join("%s%s.%s%s" % (
+        read_regex = re.compile('|'.join("%s%s.%s%s" % (
             re_prefix, suffix[:i], suffix[i+1:], re_suffix
         ) for i in range(len(suffix))))
 
     # open fastq file
     fastq = open(input_file)
-    print("Processing %s" % os.path.basename(input_file))
+
+    # start sample log
+    loggers[hpgl_id].info("#" * 80 + "\n")
+    loggers[hpgl_id].info("Processing %s" % os.path.basename(input_file))
+    loggers[hpgl_id].info("#" * 80 + "\n")
 
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
@@ -467,7 +504,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         seq = read[SEQUENCE][:len(spliced_leader)]
 
         # check for match
-        match = re.search(regex, seq)
+        match = re.search(read_regex, seq)
 
         # move on the next read if no match is found
         if match is None:
@@ -489,6 +526,10 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
 
         # save id
         read_ids.append(read[ID])
+
+    # log numbers
+    loggers[hpgl_id].info(("Found %d/%d reads with possible feature of interest"
+                            % (len(read_ids), i + 1)))
 
     # Paired-end reads
     if os.path.isfile(input_file.replace('_R1_', '_R2_')):
@@ -535,18 +576,13 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     reads_without_sl.close()
     reads_with_sl.close()
 
-    print("Finished processing %s" % os.path.basename(input_file))
+    loggers[hpgl_id].info("Finished processing %s" % os.path.basename(input_file))
 
     # For PE reads, grab reads from matching pair
     if paired_end:
-        print(("Processing %s (mated pair)" % 
+        loggers[hpgl_id].info(("Processing %s (mated pair)" % 
                       os.path.basename(input_mated_reads)))
         filter_fastq(input_mated_reads, output_mated_reads, read_ids)
-
-    # Create directory to keep track of Ruffus progress
-    ruffus_dir = os.path.join('build', subdir, hpgl_id, 'ruffus')
-    if not os.path.exists(ruffus_dir):
-        os.makedirs(ruffus_dir, mode=0o755)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
