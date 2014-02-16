@@ -105,15 +105,18 @@ def parse_input():
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader', 
                         help='Spliced leader DNA sequence', default=None)
     parser.add_argument('-l', '--left-anchor-reads', dest='anchor_left',
-                        help=('Require sequence of interest to be at left'
+                        help=('Require sequence of interest to be at left '
                               'side of read'), action='store_true')
     parser.add_argument('-r', '--right-anchor-reads', dest='anchor_right',
-                        help=('Require sequence of interest to be at right'
+                        help=('Require sequence of interest to be at right '
                               'side of read'), action='store_true')
     parser.add_argument('-m', '--min-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-n', '--num-mismatches', default=0, type=int,
                         help='Number of mismatches to allow (default=0)')
+    parser.add_argument('-w', '--window-size', default=10000, type=int,
+                        help=('Number of bases up/downstream of read to look '
+                              'for corresponding genes'))
     parser.add_argument('-a', '--author', help='Author contact name', 
                         default='')
     parser.add_argument('-e', '--email', help='Author contact email address',
@@ -768,8 +771,16 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     for filepath in glob.glob(input_globstr):
         sam = pysam.Samfile(filepath, 'rb')
 
+        # Keep track of read id so we only count each one once
+        read_ids = []
+
         # Get coordinate and strand for each read in bam file
         for read in sam:
+            # if we have already counted the read, stop here
+            if read.qname in read_ids:
+                continue
+            read_ids.append(read.qname)
+
             pos = read.pos
             chromosome = sam.getrname(read.tid)
             strand = -1 if read.is_reverse else 1
@@ -780,15 +791,15 @@ def compute_coordinates(input_files, output_file, hpgl_id):
             if strand == 1:
                 # For positive-strand sites, search region just downstream 
                 # of splice-site for genes
-                subseq = chromosomes[chromosome][pos:pos + 10000]
+                subseq = chromosomes[chromosome][pos:pos + args.window_size]
                 gene_start = 'start'
                 offset = 0
             else:
                 # For negative-strand sites, search region just upstream
                 # of splice-site for genes
-                subseq = chromosomes[chromosome][pos - 10000:pos]
+                subseq = chromosomes[chromosome][pos - args.window_size:pos]
                 gene_start = 'end'
-                offset = 10000
+                offset = args.window_size
 
             # If there are no nearby genes, stop here
             if len(subseq.features) == 0:
@@ -800,7 +811,6 @@ def compute_coordinates(input_files, output_file, hpgl_id):
             closest_dist = float('inf')
 
             for f in subseq.features:
-                #dist = abs(int(getattr(f.location, gene_start)) - pos)
                 dist = abs(offset - int(getattr(f.location, gene_start)))
                 if dist < closest_dist:
                     closest_gene = f.id
@@ -822,7 +832,7 @@ def compute_coordinates(input_files, output_file, hpgl_id):
                 results[chromosome][closest_gene][pos]['count'] += 1
 
     # Output filepath
-    coordinates_output = 'build/%s/output.csv' % (subdir)
+    coordinates_output = 'build/%s/sl_coordinates.csv' % (subdir)
     fp = open(coordinates_output, 'w')
 
     # Write csv header
