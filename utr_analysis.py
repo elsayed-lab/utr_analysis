@@ -240,7 +240,7 @@ def sort_and_index(base_output, num_threads=1):
                        #desc_processed, command)
 
 
-def run_tophat(output_dir, genome, r1, r2="", num_threads=1, 
+def run_tophat(output_dir, genome, logger, r1, r2="", num_threads=1, 
                max_multihits=20, extra_args=""):
     """
     Uses Tophat to map reads with the specified settings.
@@ -260,7 +260,7 @@ def run_tophat(output_dir, genome, r1, r2="", num_threads=1,
                    ["-o", output_dir, genome, r1, r2])
 
     # run tophat
-    loggers[hpgl_id].info(" ".join(tophat_cmd))
+    logger.info(" ".join(tophat_cmd))
     ret = subprocess.call(tophat_cmd)
 
     # check to see if tophat succeeded
@@ -416,6 +416,7 @@ for hpgl_id in hpgl_ids:
     handler.setFormatter(formatter)
     loggers[hpgl_id].addHandler(handler)
 
+
 #--------------------------------------
 # Ruffus tasks
 #--------------------------------------
@@ -430,6 +431,21 @@ for hpgl_id in hpgl_ids:
 # \4 - R1/R2
 # \5 - _anything_after_read_num_
 #
+def check_for_bowtie_index():
+    """check for bowtie 2 indices and create if needed"""
+    genome = os.path.splitext(args.genome)[0]
+
+    # if index exists, stop here
+    if os.path.exists('%s.1.bt2' % genome):
+        return
+
+    # otherwise, create bowtie2 index
+    logging.info("Building bowtie2 index for %s" % args.genome)
+    bowtie_cmd = (['bowtie2-build', args.genome, genome])
+    logging.info("Command:\n" + " ".join(bowtie_cmd))
+    ret = subprocess.call(bowtie_cmd)
+
+@follows(check_for_bowtie_index)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'build/%s/\2/ruffus/\2_\4.parse_reads' % subdir,
@@ -628,12 +644,13 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Map reads using Tophat
     # @TODO parameterize extra_args (except for --no-mixed in this case) to
     # allow for easier customization
-    ret = run_tophat(output_dir, genome, r1_filepath, r2_filepath,
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id],
+                     r1_filepath, r2_filepath,
                      extra_args='--mate-inner-dist 170 --no-mixed')
 
     # Make sure tophat succeeded
     if ret != 0:
-        logging.error("Error running tophat 1/2! %s (%s)" % hpgl_id, read_num)
+        logging.error("Error running tophat 1/2! %s (%s)" % (hpgl_id, read_num))
         sys.exit()
 
     # Get ids of actual SL-containing reads (those that failed to map when the
@@ -694,12 +711,13 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
     # Map reads using Tophat
     #  --no-mixed ?
-    ret = run_tophat(output_dir, genome, r1_filepath, r2_filepath,
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id],
+                 r1_filepath, r2_filepath,
                  extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
 
     # Make sure tophat succeeded
     if ret != 0:
-        logging.error("Error running tophat 2/2! %s (%s)" % hpgl_id, read_num)
+        logging.error("Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num))
         sys.exit()
 
     # Let Ruffus know we are done
@@ -725,8 +743,9 @@ def compute_coordinates(input_files, output_file, hpgl_id):
     # @TODO: Generalize for other species
     chromosomes = {}
     for rec in GFF.parse(gff_fp):
-        if rec.id.startswith('TcChr'):
-            chromosomes[int(rec.id[5:-2])] = rec
+        #if rec.id.startswith('TcChr'):
+        if len(rec.features) > 0 and rec.features[0].type == 'chromosome':
+            chromosomes[rec.id] = rec
 
     # Create a dictionary to keep track of the splice acceptor site
     # locations and frequencies
@@ -752,7 +771,7 @@ def compute_coordinates(input_files, output_file, hpgl_id):
         # Get coordinate and strand for each read in bam file
         for read in sam:
             pos = read.pos
-            chromosome = int(sam.getrname(read.tid)[5:-2])
+            chromosome = sam.getrname(read.tid)
             strand = -1 if read.is_reverse else 1
 
             # Find nearest gene
