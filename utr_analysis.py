@@ -139,9 +139,16 @@ def parse_input():
 
 def num_lines(filepath):
     """Returns the number of lines in a specified file"""
-    with open(filepath) as fp:
-        for i, line in enumerate(fp, 1):
-            pass
+    if filepath.endswith('.gz'):
+        fp = gzip.open(filepath, 'rb')
+    else:
+        fp = open(filepath)
+
+    # count number of lines
+    for i, line in enumerate(fp, 1):
+        pass
+
+    fp.close()
     return i
 
 def readfq(fp):
@@ -300,7 +307,7 @@ def gzip_str(filepath, strbuffer):
     fp.write(strbuffer.read())
     fp.close()
 
-def filter_fastq(infile, outfile, read_ids):
+def filter_fastq(infile, outfile, read_ids, logger):
     """Takes a filepath to a FASTQ file and returns a new version of the file
     which contains only reads with the specified ids"""
     if infile.endswith('.gz'):
@@ -309,6 +316,10 @@ def filter_fastq(infile, outfile, read_ids):
         fastq = open(infile)
 
     filtered_reads = StringIO.StringIO()
+
+    # get number of reads to be searched
+    num_reads = num_lines(infile) / 4
+    hundreth = int(round(num_reads / 100))
 
     # normalize fastq ids and ignore right-part of id row, including the
     # mated pair read number, during comparision
@@ -324,7 +335,11 @@ def filter_fastq(infile, outfile, read_ids):
     loggers[hpgl_id].info("# Filtering fastq for %d matched reads" % len(read_ids))
 
     # iterate through each entry in fastq file
-    for i, read in enumerate(readfq(fastq)):
+    for i, read in enumerate(readfq(fastq), 1):
+        # log progress
+        if i % hundreth == 0:
+            logger.info('# %2d%' % round(i / float(hundreth)))
+
         # normalized entry id
         fastq_id = read[ID].split()[0].strip('@')
 
@@ -345,6 +360,9 @@ def filter_fastq(infile, outfile, read_ids):
         # exit loop when all ids have been found
         if len(read_ids) == 0:
             break
+
+    logger.info(' # 100%')
+    logger.info(' # Done filtering')
 
     # write matching paired-end reads to compressed fastq
     gzip_str(outfile, filtered_reads)
@@ -418,7 +436,7 @@ loggers = {}
 # setup sample-specific loggers
 for hpgl_id in hpgl_ids:
     build_dir = os.path.join('build', subdir, hpgl_id)
-    log_file = os.path.join(build_dir, '%s_build.log' % hpgl_id)
+    log_file = os.path.join(build_dir, '%s.log' % hpgl_id)
     loggers[hpgl_id] = logging.getLogger(hpgl_id)
     handler = logging.FileHandler(log_file)
     handler.setFormatter(formatter)
@@ -526,7 +544,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     # total number of reads
     num_reads = num_lines(input_file) / 4
     loggers[hpgl_id].info(("# Scanning %d reads for feature of interest" % 
-                           os.path.basename(input_file)))
+                           num_reads)) 
 
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
@@ -565,9 +583,8 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         read_ids.append(read[ID])
 
     # log numbers
-    loggers[hpgl_id].info(("# "
-    loggers[hpgl_id].info(("# Found %d/%d reads with possible feature of interest"
-                            % (len(read_ids), i + 1)))
+    loggers[hpgl_id].info(("# Found %d reads with possible feature of interest"
+                            % (len(read_ids))))
 
     # Paired-end reads
     if os.path.isfile(input_file.replace('_R1_', '_R2_')):
@@ -614,13 +631,15 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     reads_without_sl.close()
     reads_with_sl.close()
 
-    loggers[hpgl_id].info("Finished processing %s" % os.path.basename(input_file))
+    loggers[hpgl_id].info(("# Finished processing %s" %
+                           os.path.basename(input_file)))
 
     # For PE reads, grab reads from matching pair
     if paired_end:
-        loggers[hpgl_id].info(("Processing %s (mated pair)" % 
-                      os.path.basename(input_mated_reads)))
-        filter_fastq(input_mated_reads, output_mated_reads, read_ids)
+        loggers[hpgl_id].info(("# Retrieving mated pair reads for %s" % 
+                               os.path.basename(input_mated_reads)))
+        filter_fastq(input_mated_reads, output_mated_reads, read_ids,
+                     loggers[hpgl_id])
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -630,7 +649,8 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
            r'\1/\2_\3.remove_false_hits',
            r'\2', r'\3')
 def remove_false_hits(input_file, output_file, hpgl_id, read_num):
-    output_dir = 'build/%s/%s/tophat/%s_false_hits' % (subdir, hpgl_id, read_num)
+    output_dir = ('build/%s/%s/tophat/%s_false_hits' % (subdir, hpgl_id,
+                                                        read_num))
     genome = os.path.splitext(args.genome)[0]
 
     # input read base directory
@@ -656,6 +676,9 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Map reads using Tophat
     # @TODO parameterize extra_args (except for --no-mixed in this case) to
     # allow for easier customization
+    loggers[hpgl_id].info(("# Mapping full reads containing feature of "
+                           "interest to find false hits (reads that correspond"
+                           " to actual features in the genome"))
     ret = run_tophat(output_dir, genome, loggers[hpgl_id],
                      r1_filepath, r2_filepath,
                      extra_args='--mate-inner-dist 170 --no-mixed')
@@ -681,13 +704,21 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Filter R1 reads
     r1_infile = r1_filepath.replace('with_sl', 'without_sl')
     r1_outfile = r1_infile.replace('possible', 'actual')
-    filter_fastq(r1_infile, r1_outfile, good_ids)
+    loggers[hpgl_id].info(
+        "# Filtering matched reads to remove false hits (R1)"
+    )
+    filter_fastq(r1_infile, r1_outfile, good_ids, loggers[hpgl_id])
 
     # Filter R2 reads
     if r2_filepath != "":
         r2_infile = r2_filepath.replace('with_sl', 'without_sl')
         r2_outfile = r2_infile.replace('possible', 'actual')
-        filter_fastq(r2_infile, r2_outfile, good_ids)
+        loggers[hpgl_id].info(
+            "# Filtering matched reads to remove false hits (R2)"
+        )
+        filter_fastq(r2_infile, r2_outfile, good_ids, loggers[hpgl_id])
+
+    loggers[hpgl_id].info("# Finished removing false hits."
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -700,6 +731,8 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
     output_dir = 'build/%s/%s/tophat/%s_sl_reads' % (subdir, hpgl_id, read_num)
     genome = os.path.splitext(args.genome)[0]
+
+    loggers[hpgl_id].info("# Mapping filtered reads back to genome")
 
     # input read base directory
     basedir = 'build/%s/%s/fastq' % (subdir, hpgl_id)
@@ -732,6 +765,8 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
         logging.error("# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num))
         sys.exit()
 
+    loggers[hpgl_id].info("Finished mapping hits to genome")
+
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
@@ -749,6 +784,8 @@ def compute_coordinates(input_files, output_file):
     """
     # load GFF
     gff_fp = open(args.gff)
+
+    logging.info("# Computing coordinates for mapped hits")
 
     # Get chromosomes from GFF file
     # @TODO: Generalize for other species
@@ -867,6 +904,8 @@ def compute_coordinates(input_files, output_file):
                     results[chrnum][gene_id][acceptor_site]['dist'],
                     results[chrnum][gene_id][acceptor_site]['count']
                 ])
+
+    logging.info("# Finished!")
 
     # clean up
     gff_fp.close()
