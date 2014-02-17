@@ -228,11 +228,11 @@ def sort_and_index(base_output, num_threads=1):
     """Sorts and indexes .bam files using samtools"""
     sort_cmd = ['samtools', 'sort', '-@', str(num_threads), 
                 base_output + ".bam", base_output + "_sorted"]
-    loggers[hpgl_id].info(" ".join(sort_cmd))
+    loggers[hpgl_id][read_num].info(" ".join(sort_cmd))
     subprocess.call(sort_cmd)
 
     index_cmd = ['samtools', 'index', base_output + '_sorted.bam']
-    loggers[hpgl_id].info(" ".join(index_cmd))
+    loggers[hpgl_id][read_num].info(" ".join(index_cmd))
     subprocess.call(index_cmd)
 
 #def add_sam_header(filepath, description, author, email, cmd):
@@ -439,12 +439,15 @@ loggers = {}
 
 # setup sample-specific loggers
 for hpgl_id in hpgl_ids:
+    loggers[hpgl_id] = {}
     build_dir = os.path.join('build', subdir, hpgl_id)
-    log_file = os.path.join(build_dir, '%s.log' % hpgl_id)
-    loggers[hpgl_id] = logging.getLogger(hpgl_id)
-    handler = logging.FileHandler(log_file)
-    handler.setFormatter(formatter)
-    loggers[hpgl_id].addHandler(handler)
+
+    for read_num in ['R1', 'R2']:
+        log_file = os.path.join(build_dir, '%s_%s.log' % (hpgl_id, read_num))
+        loggers[hpgl_id][read_num] = logging.getLogger(hpgl_id + read_num)
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(formatter)
+        loggers[hpgl_id][read_num].addHandler(handler)
 
 
 #--------------------------------------
@@ -543,13 +546,14 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     fastq = open(input_file)
 
     # start sample log
-    loggers[hpgl_id].info("# Processing %s" % os.path.basename(input_file))
+    loggers[hpgl_id][read_num].info(
+        "# Processing %s" % os.path.basename(input_file)
+    )
 
     # total number of reads
     num_reads = num_lines(input_file) / 4
-    loggers[hpgl_id].info(
-        "# Scanning %d reads for feature of interest (%s: %s)" %
-        (num_reads, hpgl_id, read_num)
+    loggers[hpgl_id][read_num].info(
+        "# Scanning %d reads for feature of interest" % (num_reads)
     )
 
     # open output string buffer (will write to compressed file later)
@@ -589,9 +593,8 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         read_ids.append(read[ID])
 
     # log numbers
-    loggers[hpgl_id].info(
-        "# Found %d reads with possible feature of interest (%s)" %
-        (len(read_ids), read_num)
+    loggers[hpgl_id][read_num].info(
+        "# Found %d reads with possible feature of interest" % len(read_ids)
     )
 
     # Paired-end reads
@@ -639,15 +642,18 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     reads_without_sl.close()
     reads_with_sl.close()
 
-    loggers[hpgl_id].info(("# Finished processing %s" %
-                           os.path.basename(input_file)))
+    loggers[hpgl_id][read_num].info(
+        "# Finished processing %s" % os.path.basename(input_file)
+    )
 
     # For PE reads, grab reads from matching pair
     if paired_end:
-        loggers[hpgl_id].info(("# Retrieving mated pair reads for %s" % 
-                               os.path.basename(input_mated_reads)))
+        loggers[hpgl_id][read_num].info(
+            "# Retrieving mated pair reads for %s" %
+            os.path.basename(input_mated_reads)
+        )
         filter_fastq(input_mated_reads, output_mated_reads, read_ids,
-                     loggers[hpgl_id])
+                     loggers[hpgl_id][read_num])
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -684,10 +690,11 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Map reads using Tophat
     # @TODO parameterize extra_args (except for --no-mixed in this case) to
     # allow for easier customization
-    loggers[hpgl_id].info(("# Mapping full reads containing feature of "
-                           "interest to find false hits (reads that correspond"
-                           " to actual features in the genome"))
-    ret = run_tophat(output_dir, genome, loggers[hpgl_id],
+    loggers[hpgl_id][read_num].info(
+        "# Mapping full reads containing feature of interest to find false\n"
+        "# hits (reads that correspond to actual features in the genome"
+    )
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id][read_num],
                      r1_filepath, r2_filepath,
                      extra_args='--mate-inner-dist 170 --no-mixed')
 
@@ -705,9 +712,10 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # number of reads before filtering
     num_reads_before = num_lines(r1_filepath) / 4
-    loggers[hpgl_id].info(("# Removing %d false hits (%d total)" % (
-        num_reads_before - good_ids, num_reads_before
-    )))
+    loggers[hpgl_id][read_num].info(
+        "# Removing %d false hits (%d total)" %
+        (num_reads_before - good_ids, num_reads_before)
+    )
 
     # Create true hits directory
     hits_dir = os.path.join(basedir, 'actual_sl_reads')
@@ -720,21 +728,22 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Filter R1 reads
     r1_infile = r1_filepath.replace('with_sl', 'without_sl')
     r1_outfile = r1_infile.replace('possible', 'actual')
-    loggers[hpgl_id].info(
+    loggers[hpgl_id][read_num].info(
         "# Filtering matched reads to remove false hits (R1)"
     )
-    filter_fastq(r1_infile, r1_outfile, good_ids, loggers[hpgl_id])
+    filter_fastq(r1_infile, r1_outfile, good_ids, loggers[hpgl_id][read_num])
 
     # Filter R2 reads
     if r2_filepath != "":
         r2_infile = r2_filepath.replace('with_sl', 'without_sl')
         r2_outfile = r2_infile.replace('possible', 'actual')
-        loggers[hpgl_id].info(
+        loggers[hpgl_id][read_num].info(
             "# Filtering matched reads to remove false hits (R2)"
         )
-        filter_fastq(r2_infile, r2_outfile, good_ids, loggers[hpgl_id])
+        filter_fastq(r2_infile, r2_outfile, good_ids,
+                     loggers[hpgl_id][read_num])
 
-    loggers[hpgl_id].info("# Finished removing false hits.")
+    loggers[hpgl_id][read_num].info("# Finished removing false hits.")
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -748,7 +757,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     output_dir = 'build/%s/%s/tophat/%s_sl_reads' % (subdir, hpgl_id, read_num)
     genome = os.path.splitext(args.genome)[0]
 
-    loggers[hpgl_id].info("# Mapping filtered reads back to genome")
+    loggers[hpgl_id][read_num].info("# Mapping filtered reads back to genome")
 
     # input read base directory
     basedir = 'build/%s/%s/fastq' % (subdir, hpgl_id)
@@ -776,7 +785,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
     # Map reads using Tophat
     #  --no-mixed ?
-    ret = run_tophat(output_dir, genome, loggers[hpgl_id],
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id][read_num],
                  r1_filepath, r2_filepath,
                  extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
 
@@ -787,7 +796,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
         )
         sys.exit()
 
-    loggers[hpgl_id].info("# Finished mapping hits to genome")
+    loggers[hpgl_id][read_num].info("# Finished mapping hits to genome")
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -922,9 +931,9 @@ def compute_coordinates(input_files, output_file):
                 results[chromosome][closest_gene][pos]['count'] += 1
 
         # record number of good and bad reads
-        loggers[hpgl_id].info(
+        loggers[hpgl_id][read_num].info(
             "# Found %d reads with feature in expected location" % num_good)
-        loggers[hpgl_id].info(
+        loggers[hpgl_id][read_num].info(
             "# Found %d reads with feature in incorrect location" % num_bad)
 
     # Output filepath
