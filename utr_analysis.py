@@ -137,6 +137,13 @@ def parse_input():
     # @TODO Validate input
     return args
 
+def num_lines(filepath):
+    """Returns the number of lines in a specified file"""
+    with open(filepath) as fp:
+        for i, line in enumerate(fp, 1):
+            pass
+    return i
+
 def readfq(fp):
     """
     Loads a fastq file into memory
@@ -314,7 +321,7 @@ def filter_fastq(infile, outfile, read_ids):
     # shuffle to speed things up
     random.shuffle(read_ids)
 
-    loggers[hpgl_id].info("Filtering fastq for %d matched reads" % len(read_ids))
+    loggers[hpgl_id].info("# Filtering fastq for %d matched reads" % len(read_ids))
 
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq)):
@@ -401,11 +408,9 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger('').addHandler(console)
 
-logging.info("#" * 80 + "\n")
-logging.info("Starting UTR Analysis")
-logging.info("Python %s" % sys.version)
-logging.info("%s" % " ".join(sys.argv))
-logging.info("#" * 80 + "\n")
+logging.info("# Starting UTR Analysis")
+logging.info("# Python %s" % sys.version)
+logging.info("# Command:\n%s" % " ".join(sys.argv))
 
 # create dictionary of log handlers for sample-specific info
 loggers = {}
@@ -413,7 +418,7 @@ loggers = {}
 # setup sample-specific loggers
 for hpgl_id in hpgl_ids:
     build_dir = os.path.join('build', subdir, hpgl_id)
-    log_file = os.path.join(build_dir, '%s.log' % hpgl_id)
+    log_file = os.path.join(build_dir, '%s_build.log' % hpgl_id)
     loggers[hpgl_id] = logging.getLogger(hpgl_id)
     handler = logging.FileHandler(log_file)
     handler.setFormatter(formatter)
@@ -443,9 +448,9 @@ def check_for_bowtie_index():
         return
 
     # otherwise, create bowtie2 index
-    logging.info("Building bowtie2 index for %s" % args.genome)
+    logging.info("# Building bowtie2 index for %s" % args.genome)
     bowtie_cmd = (['bowtie2-build', args.genome, genome])
-    logging.info("Command:\n" + " ".join(bowtie_cmd))
+    logging.info("# Command:\n" + " ".join(bowtie_cmd))
     ret = subprocess.call(bowtie_cmd)
 
 @follows(check_for_bowtie_index)
@@ -516,9 +521,12 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     fastq = open(input_file)
 
     # start sample log
-    loggers[hpgl_id].info("#" * 80 + "\n")
-    loggers[hpgl_id].info("Processing %s" % os.path.basename(input_file))
-    loggers[hpgl_id].info("#" * 80 + "\n")
+    loggers[hpgl_id].info("# Processing %s" % os.path.basename(input_file))
+
+    # total number of reads
+    num_reads = num_lines(input_file) / 4
+    loggers[hpgl_id].info(("# Scanning %d reads for feature of interest" % 
+                           os.path.basename(input_file)))
 
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
@@ -557,7 +565,8 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         read_ids.append(read[ID])
 
     # log numbers
-    loggers[hpgl_id].info(("Found %d/%d reads with possible feature of interest"
+    loggers[hpgl_id].info(("# "
+    loggers[hpgl_id].info(("# Found %d/%d reads with possible feature of interest"
                             % (len(read_ids), i + 1)))
 
     # Paired-end reads
@@ -653,7 +662,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # Make sure tophat succeeded
     if ret != 0:
-        logging.error("Error running tophat 1/2! %s (%s)" % (hpgl_id, read_num))
+        logging.error("# Error running tophat 1/2! %s (%s)" % (hpgl_id, read_num))
         sys.exit()
 
     # Get ids of actual SL-containing reads (those that failed to map when the
@@ -720,7 +729,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
     # Make sure tophat succeeded
     if ret != 0:
-        logging.error("Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num))
+        logging.error("# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num))
         sys.exit()
 
     # Let Ruffus know we are done
@@ -728,9 +737,8 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
 @collate(map_sl_reads,
        regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
-       r'\1/\2_.compute_coordinates',
-       r'\2')
-def compute_coordinates(input_files, output_file, hpgl_id):
+       r'\1/\2_.compute_coordinates')
+def compute_coordinates(input_files, output_file):
     """Maps the filtered spliced-leader containing reads back to the genome.
 
     References
@@ -769,6 +777,10 @@ def compute_coordinates(input_files, output_file, hpgl_id):
 
     # Itereate over mapped reads
     for filepath in glob.glob(input_globstr):
+        # get hpgl id
+        hpgl_id = re.match('.*(HPGL[0-9]+).*', x).groups()[0]
+
+        # open sam file
         sam = pysam.Samfile(filepath, 'rb')
 
         # Keep track of read id so we only count each one once
@@ -843,14 +855,15 @@ def compute_coordinates(input_files, output_file, hpgl_id):
 
     # Write header to output
     writer = csv.writer(fp)
-    writer.writerow(['gene', 'chromosome', 'location', 'distance', 'count'])
+    writer.writerow(['hpgl_id', 'gene', 'chromosome', 'location', 'distance', 
+                     'count'])
 
     # write output to csv
     for chrnum in results:
         for gene_id in results[chrnum]:
             for acceptor_site in results[chrnum][gene_id]:
                 writer.writerow([
-                    gene_id, chrnum, acceptor_site,
+                    gene_id, hpgl_id, chrnum, acceptor_site,
                     results[chrnum][gene_id][acceptor_site]['dist'],
                     results[chrnum][gene_id][acceptor_site]['count']
                 ])
