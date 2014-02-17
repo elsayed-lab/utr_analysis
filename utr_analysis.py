@@ -543,8 +543,8 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
 
     # total number of reads
     num_reads = num_lines(input_file) / 4
-    loggers[hpgl_id].info(("# Scanning %d reads for feature of interest" % 
-                           num_reads)) 
+    loggers[hpgl_id].info(("# Scanning %d reads for feature of interest (%s)" %
+                           num_reads, read_num)) 
 
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
@@ -583,8 +583,10 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         read_ids.append(read[ID])
 
     # log numbers
-    loggers[hpgl_id].info(("# Found %d reads with possible feature of interest"
-                            % (len(read_ids))))
+    loggers[hpgl_id].info((
+        "# Found %d reads with possible feature of interest (%s)" % (
+        len(read_ids), read_num))
+    )
 
     # Paired-end reads
     if os.path.isfile(input_file.replace('_R1_', '_R2_')):
@@ -693,6 +695,11 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     sam = pysam.Samfile(os.path.join(output_dir, 'unmapped.bam'), 'rb')
     good_ids = [x.qname for x in sam]
 
+    # number of reads before filtering
+    num_reads_before = num_lines(r1_filepath) / 4
+    loggers[hpgl_id].info(("# Removing %d false hits (%d total)" % (
+        num_reads_before - good_ids, num_reads_before)))
+
     # Create true hits directory
     hits_dir = os.path.join(basedir, 'actual_sl_reads')
     if not os.path.exists(hits_dir):
@@ -765,7 +772,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
         logging.error("# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num))
         sys.exit()
 
-    loggers[hpgl_id].info("Finished mapping hits to genome")
+    loggers[hpgl_id].info("# Finished mapping hits to genome")
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -817,6 +824,10 @@ def compute_coordinates(input_files, output_file):
         # get hpgl id
         hpgl_id = re.match('.*(HPGL[0-9]+).*', x).groups()[0]
 
+        # keep track of how many reads were found in the expected location
+        num_good = 0
+        num_bad = 0
+
         # open sam file
         sam = pysam.Samfile(filepath, 'rb')
 
@@ -853,7 +864,10 @@ def compute_coordinates(input_files, output_file):
             # If there are no nearby genes, stop here
             if len(subseq.features) == 0:
                 debug_writer.writerow([read.qname, chromosome, strand, pos])
+                num_bad = num_bad + 1
                 continue
+
+            num_good = num_good + 1
 
             # Otherwise find closest gene to the acceptor site
             closest_gene = None
@@ -880,6 +894,12 @@ def compute_coordinates(input_files, output_file):
             else:
                 results[chromosome][closest_gene][pos]['count'] += 1
 
+        # record number of good and bad reads
+        loggers[hpgl_id].info(
+            "# Found %d reads with feature in expected location" % num_good)
+        loggers[hpgl_id].info(
+            "# Found %d reads with feature in incorrect location" % num_bad)
+
     # Output filepath
     coordinates_output = 'build/%s/sl_coordinates.csv' % (subdir)
     fp = open(coordinates_output, 'w')
@@ -892,7 +912,7 @@ def compute_coordinates(input_files, output_file):
 
     # Write header to output
     writer = csv.writer(fp)
-    writer.writerow(['hpgl_id', 'gene', 'chromosome', 'location', 'distance', 
+    writer.writerow(['gene', 'chromosome', 'location', 'distance', 
                      'count'])
 
     # write output to csv
@@ -900,7 +920,7 @@ def compute_coordinates(input_files, output_file):
         for gene_id in results[chrnum]:
             for acceptor_site in results[chrnum][gene_id]:
                 writer.writerow([
-                    gene_id, hpgl_id, chrnum, acceptor_site,
+                    gene_id, chrnum, acceptor_site,
                     results[chrnum][gene_id][acceptor_site]['dist'],
                     results[chrnum][gene_id][acceptor_site]['count']
                 ])
