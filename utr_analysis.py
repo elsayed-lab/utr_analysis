@@ -824,6 +824,13 @@ def compute_coordinates(input_files, output_file):
         # get hpgl id
         hpgl_id = re.match('.*(HPGL[0-9]+).*', x).groups()[0]
 
+        # file to save results for individual sample
+        base_dir = filepath[:re.search('tophat', filepath).start()]
+        sample_hits = os.path.join(base_dir, hpgl_id + '_sl_coordinates.csv')
+        sample_csv_writer = csv.writer(open(sample_hits, 'w'))
+        sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome', 
+                                    'strand', 'position', 'distance'])
+
         # keep track of how many reads were found in the expected location
         num_good = 0
         num_bad = 0
@@ -884,6 +891,11 @@ def compute_coordinates(input_files, output_file):
                 results[chromosome] = {}
             if not closest_gene in results[chromosome]:
                 results[chromosome][closest_gene] = {}
+
+            # Add entry to sample output csv
+            sample_csv_writer.writerow([
+                read.qname, closest_gene, chromosome, strand, pos, closest_dist
+            ])
 
             # Increment SL site count and save distance from gene
             if not pos in results[chromosome][closest_gene]:
