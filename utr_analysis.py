@@ -117,6 +117,8 @@ def parse_input():
     parser.add_argument('-w', '--window-size', default=10000, type=int,
                         help=('Number of bases up/downstream of read to look '
                               'for corresponding genes'))
+    parser.add_argument('-t', '--num-threads', default=4, type=int,
+                        help='Number of threads to use.')
     parser.add_argument('-a', '--author', help='Author contact name', 
                         default='')
     parser.add_argument('-e', '--email', help='Author contact email address',
@@ -257,7 +259,7 @@ def sort_and_index(base_output, num_threads=1):
                        #desc_processed, command)
 
 
-def run_tophat(output_dir, genome, logger, r1, r2="", num_threads=1, 
+def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1, 
                max_multihits=20, extra_args=""):
     """
     Uses Tophat to map reads with the specified settings.
@@ -277,7 +279,7 @@ def run_tophat(output_dir, genome, logger, r1, r2="", num_threads=1,
                    ["-o", output_dir, genome, r1, r2])
 
     # run tophat
-    logger.info(" ".join(tophat_cmd))
+    log_handle.info(" ".join(tophat_cmd))
     ret = subprocess.call(tophat_cmd)
 
     # check to see if tophat succeeded
@@ -307,7 +309,7 @@ def gzip_str(filepath, strbuffer):
     fp.write(strbuffer.read())
     fp.close()
 
-def filter_fastq(infile, outfile, read_ids, logger):
+def filter_fastq(infile, outfile, read_ids, log_handle):
     """Takes a filepath to a FASTQ file and returns a new version of the file
     which contains only reads with the specified ids"""
     if infile.endswith('.gz'):
@@ -332,13 +334,15 @@ def filter_fastq(infile, outfile, read_ids, logger):
     # shuffle to speed things up
     random.shuffle(read_ids)
 
-    loggers[hpgl_id].info("# Filtering fastq for %d matched reads" % len(read_ids))
+    log_handle.info(
+        "# Filtering fastq for %d matched reads" % len(read_ids)
+    )
 
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq), 1):
         # log progress
         if i % hundreth == 0:
-            logger.info('# %2d%' % round(i / float(hundreth)))
+            log_handle.info('# %2d%%' % round(i / float(hundreth)))
 
         # normalized entry id
         fastq_id = read[ID].split()[0].strip('@')
@@ -361,8 +365,8 @@ def filter_fastq(infile, outfile, read_ids, logger):
         if len(read_ids) == 0:
             break
 
-    logger.info(' # 100%')
-    logger.info(' # Done filtering')
+    log_handle.info(' # 100%')
+    log_handle.info(' # Done filtering')
 
     # write matching paired-end reads to compressed fastq
     gzip_str(outfile, filtered_reads)
@@ -543,8 +547,10 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
 
     # total number of reads
     num_reads = num_lines(input_file) / 4
-    loggers[hpgl_id].info(("# Scanning %d reads for feature of interest (%s)" %
-                           num_reads, read_num)) 
+    loggers[hpgl_id].info(
+        "# Scanning %d reads for feature of interest (%s: %s)" %
+        (num_reads, hpgl_id, read_num)
+    )
 
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
@@ -583,9 +589,9 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         read_ids.append(read[ID])
 
     # log numbers
-    loggers[hpgl_id].info((
-        "# Found %d reads with possible feature of interest (%s)" % (
-        len(read_ids), read_num))
+    loggers[hpgl_id].info(
+        "# Found %d reads with possible feature of interest (%s)" %
+        (len(read_ids), read_num)
     )
 
     # Paired-end reads
@@ -687,7 +693,9 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # Make sure tophat succeeded
     if ret != 0:
-        logging.error("# Error running tophat 1/2! %s (%s)" % (hpgl_id, read_num))
+        logging.error(
+            "# Error running tophat 1/2! %s (%s)" % (hpgl_id, read_num)
+        )
         sys.exit()
 
     # Get ids of actual SL-containing reads (those that failed to map when the
@@ -698,7 +706,8 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # number of reads before filtering
     num_reads_before = num_lines(r1_filepath) / 4
     loggers[hpgl_id].info(("# Removing %d false hits (%d total)" % (
-        num_reads_before - good_ids, num_reads_before)))
+        num_reads_before - good_ids, num_reads_before
+    )))
 
     # Create true hits directory
     hits_dir = os.path.join(basedir, 'actual_sl_reads')
@@ -725,7 +734,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
         )
         filter_fastq(r2_infile, r2_outfile, good_ids, loggers[hpgl_id])
 
-    loggers[hpgl_id].info("# Finished removing false hits."
+    loggers[hpgl_id].info("# Finished removing false hits.")
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -746,8 +755,10 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
-        r1_filepath = ('%s/actual_sl_reads/%s_R1_match_R1_without_sl.fastq.gz' %
-                       (basedir, hpgl_id))
+        r1_filepath = (
+            '%s/actual_sl_reads/%s_R1_match_R1_without_sl.fastq.gz' %
+            (basedir, hpgl_id)
+        )
 
         # R2 filepath (for PE reads)
         r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
@@ -757,8 +768,10 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
             r2_filepath = ""
     # R2
     else:
-        r2_filepath = ('%s/actual_sl_reads/%s_R2_match_R2_without_sl.fastq.gz' %
-                       (basedir, hpgl_id))
+        r2_filepath = (
+            '%s/actual_sl_reads/%s_R2_match_R2_without_sl.fastq.gz' %
+            (basedir, hpgl_id)
+        )
         r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
 
     # Map reads using Tophat
@@ -769,7 +782,9 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
     # Make sure tophat succeeded
     if ret != 0:
-        logging.error("# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num))
+        logging.error(
+            "# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num)
+        )
         sys.exit()
 
     loggers[hpgl_id].info("# Finished mapping hits to genome")
@@ -979,7 +994,7 @@ def compute_coordinates(input_files, output_file):
 # run pipeline
 if __name__ == "__main__":
     pipeline_run([compute_coordinates], logger=logging.getLogger(''),
-                 multiprocess=8)
+                 multiprocess=args.num_threads)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
                             [compute_coordinates])
 
