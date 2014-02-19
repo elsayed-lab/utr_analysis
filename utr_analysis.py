@@ -226,16 +226,32 @@ def create_header_comment(filename, description, author, email):
     return template % (filename, author, email, datetime.datetime.utcnow(),
                        desc_processed, command)
 
-def sort_and_index(base_output, num_threads=1):
-    """Sorts and indexes .bam files using samtools"""
-    sort_cmd = ['samtools', 'sort', '-@', str(num_threads), 
-                base_output + ".bam", base_output + "_sorted"]
-    loggers[hpgl_id][read_num].info(" ".join(sort_cmd))
-    subprocess.call(sort_cmd)
+def run_command(cmd, log_handle):
+    """Runs a command and logs the output to a specified log handle"""
+    log_handle.info(cmd)
 
-    index_cmd = ['samtools', 'index', base_output + '_sorted.bam']
-    loggers[hpgl_id][read_num].info(" ".join(index_cmd))
-    subprocess.call(index_cmd)
+    process = subprocess.Popen(cmd.split(" "),
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    if stdout:
+        log_handle.info(stdout)
+    if stderr:
+        log_handle.error(stderr)
+
+    return prcoess.returncode
+
+def sort_and_index(base_output, log_handle):
+    """Sorts and indexes .bam files using samtools"""
+    # sort bam
+    sort_cmd = 'samtools sort %s %s' % (
+        base_output + ".bam", base_output + "_sorted")
+    run_command(sort_cmd, log_handle)
+
+    # index bam
+    index_cmd = 'samtools index %s' % (base_output + '_sorted.bam')
+    run_command(index_cmd, log_handle)
 
 #def add_sam_header(filepath, description, author, email, cmd):
     #"""Adds a header to a sam file including some information about how the
@@ -275,22 +291,19 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
         os.makedirs(output_dir, mode=0o755)
 
     # build command
-    tophat_cmd = (["tophat", "--num-threads", str(num_threads), 
-                   "--max-multihits",
-                   str(max_multihits)] + extra_args.split() +
-                   ["-o", output_dir, genome, r1, r2])
+    cmd = "tophat --num-threads %d --max-multihits %d %s -o %s %s %s %s" % (
+           num_threads, max_multihits, extra_args, output_dir, genome, r1, r2)
 
     # run tophat
-    log_handle.info(" ".join(tophat_cmd))
-    ret = subprocess.call(tophat_cmd)
+    ret = run_command(cmd, log_handle)
 
     # check to see if tophat succeeded
     if ret != 0:
         return ret
 
     # sort and index bam output using samtools
-    sort_and_index(os.path.join(output_dir, 'accepted_hits'), num_threads)
-    sort_and_index(os.path.join(output_dir, 'unmapped'), num_threads)
+    sort_and_index(os.path.join(output_dir, 'accepted_hits'), log_handle)
+    sort_and_index(os.path.join(output_dir, 'unmapped'), log_handle)
 
     return 0
 
@@ -340,9 +353,7 @@ def filter_fastq(infile1, infile2, outfile1, outfile2, read_ids, log_handle):
     # shuffle to speed things up
     random.shuffle(read_ids)
 
-    log_handle.info(
-        "# Filtering fastq for %d matched reads" % len(read_ids)
-    )
+    log_handle.info("# Filtering fastq for %d matched reads" % len(read_ids))
 
     # mated reads handle
     mated_reads = readfq(fastq2)
@@ -668,7 +679,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
                                 mated_read[SEQUENCE_IDX],
                                 "+",
                                 mated_read[QUALITY_IDX]]
-        mated_reads_buffer write("\n".join(untrimmed_mated_read) + "\n")
+        mated_reads_buffer.write("\n".join(untrimmed_mated_read) + "\n")
 
         # save id
         read_ids.append(read[ID_IDX])
@@ -685,7 +696,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     # write trimmed and untrimmed reads to fastq.gz
     gzip_str(output_without_sl, reads_without_sl)
     gzip_str(output_with_sl, reads_with_sl)
-    qzip_str(output_mated_reads, mated_reads_buffer)
+    gzip_str(output_mated_reads, mated_reads_buffer)
 
     # clean up
     fastq.close()
@@ -769,8 +780,8 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     r1_outfile = r1_infile.replace('possible', 'actual')
     r2_outfile = r2_infile.replace('possible', 'actual')
 
-    filter_fastq(r1_infile1, r2_infile,
-                 r1_outfile, r2_outfile, read_ids, log_handle)
+    filter_fastq(r1_infile, r2_infile,
+                 r1_outfile, r2_outfile, good_ids, log_handle)
 
     loggers[hpgl_id][read_num].info("# Finished removing false hits.")
 
