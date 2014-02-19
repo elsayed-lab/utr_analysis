@@ -877,11 +877,13 @@ def compute_coordinates(input_files, output_file):
     input_globstr = ('build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
                      subdir)
 
-    # TESTING 2014/02/13
-    # Let's see what is not matching
-    not_matched = 'build/%s/no_matches.csv' % (subdir)
-    debug_writer = csv.writer(open(not_matched, 'w'))
-    debug_writer.writerow(['read_id', 'chromosome', 'strand', 'position'])
+    # Output: no genes nearby
+    no_nearby_genes = csv.writer(open('build/%s/no_matches.csv' % subdir, 'w'))
+    no_nearby_genes.writerow(['read_id', 'chromosome', 'strand', 'position'])
+
+    # Output: predicted site inside a CDS
+    inside_cds = csv.writer(open('build/%s/inside_cds.csv' % subdir, 'w'))
+    inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
 
     # Itereate over mapped reads
     for filepath in glob.glob(input_globstr):
@@ -897,7 +899,8 @@ def compute_coordinates(input_files, output_file):
 
         # keep track of how many reads were found in the expected location
         num_good = 0
-        num_bad = 0
+        num_no_nearby_genes = 0
+        num_inside_cds = 0
 
         # open sam file
         sam = pysam.Samfile(filepath, 'rb')
@@ -915,6 +918,18 @@ def compute_coordinates(input_files, output_file):
             pos = read.pos
             chromosome = sam.getrname(read.tid)
             strand = -1 if read.is_reverse else 1
+
+            # first, check to make sure the acceptor site does not fall within
+            # a known CDS -- if it does, save to a separate file to look
+            # at later
+            nearby = chromosomes[chromosome][pos - 5000:pos + 5000]
+            for feature in nearby.features:
+                if ((feature.location.start <= 5000) and 
+                    (feature.location.end >= 5000)):
+                    # predicted acceptor site is inside a CDS
+                    inside_cds.writerow([read.qname, chromosome, strand, pos])
+                    num_inside_cds = num_inside_cds + 1
+                    continue
 
             # Find nearest gene
             # 1. Get genes within +/- N bases of location (if any)
@@ -934,8 +949,8 @@ def compute_coordinates(input_files, output_file):
 
             # If there are no nearby genes, stop here
             if len(subseq.features) == 0:
-                debug_writer.writerow([read.qname, chromosome, strand, pos])
-                num_bad = num_bad + 1
+                no_nearby_genes.writerow([read.qname, chromosome, strand, pos])
+                num_no_nearby_genes = num_no_nearby_genes + 1
                 continue
 
             num_good = num_good + 1
@@ -972,9 +987,14 @@ def compute_coordinates(input_files, output_file):
 
         # record number of good and bad reads
         loggers[hpgl_id][read_num].info(
-            "# Found %d reads with feature in expected location" % num_good)
+            "# Found %d reads with predicted acceptor site at expected location"
+            % num_good)
         loggers[hpgl_id][read_num].info(
-            "# Found %d reads with feature in incorrect location" % num_bad)
+            "# Found %d reads with predicted acceptor site inside a known CDS"
+            % num_inside_cds)
+        loggers[hpgl_id][read_num].info(
+            "# Found %d reads with predicted acceptor site not proximal to any CDS"
+            % num_no_nearby_genes)
 
     # Output filepath
     coordinates_output = 'build/%s/sl_coordinates.csv' % (subdir)
