@@ -21,6 +21,8 @@ this has been properly implemented, support for poly-A analysis will be added.
 
 TODO
 ----
+- For reads where feature was found in R2, discard R1 and just map R2
+  (see RIP notes)
 - Generate statistics/plot including:
     - total number of reads (or number of reads mapped to pathogen)
     - number of reads remaining after filtering (reads containing SL)
@@ -63,9 +65,9 @@ from matplotlib import pyplot as plt
 #--------------------------------------
 # FASTQ row indices
 #--------------------------------------
-ID = 0
-SEQUENCE = 1
-QUALITY = 2
+ID_IDX = 0
+SEQUENCE_IDX = 1
+QUALITY_IDX = 2
 
 #--------------------------------------
 # Non-Ruffus functions
@@ -322,6 +324,7 @@ def filter_fastq(infile, outfile, read_ids, log_handle):
     # get number of reads to be searched
     num_reads = num_lines(infile) / 4
     hundreth = int(round(num_reads / 100))
+    show_progress = len(read_ids) >= 10000
 
     # normalize fastq ids and ignore right-part of id row, including the
     # mated pair read number, during comparision
@@ -340,12 +343,12 @@ def filter_fastq(infile, outfile, read_ids, log_handle):
 
     # iterate through each entry in fastq file
     for i, read in enumerate(readfq(fastq), 1):
-        # log progress
-        if i % hundreth == 0:
+        # log progress for large numbers of records
+        if show_progress and (i % hundreth) == 0:
             log_handle.info('# %2d%%' % round(i / float(hundreth)))
 
         # normalized entry id
-        fastq_id = read[ID].split()[0].strip('@')
+        fastq_id = read[ID_IDX].split()[0].strip('@')
 
         # check to see if it is in the filtered list
         try:
@@ -355,7 +358,7 @@ def filter_fastq(infile, outfile, read_ids, log_handle):
 
         # if it is, add to filtered output
         if idx is not None:
-            fastq_entry = [read[ID], read[SEQUENCE], "+", read[QUALITY]]
+            fastq_entry = [read[ID_IDX], read[SEQUENCE_IDX], "+", read[QUALITY_IDX]]
             filtered_reads.write("\n".join(fastq_entry) + "\n")
 
             # remove id from list to reduce search space in future iterations
@@ -399,10 +402,20 @@ if args.anchor_right:
 input_regex = re.compile(r'.*(HPGL[0-9]+).*')
 hpgl_ids = []
 
+# currently processing
 for filename in glob.glob(args.input_reads):
     hpgl_id = re.match(input_regex, filename).groups()[0]
     if hpgl_id not in hpgl_ids:
         hpgl_ids.append(hpgl_id)
+
+# list of ids including previously processed samples (used for final step)
+hpgl_ids_all = hpgl_ids
+input_globstr = (
+    'build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' % subdir
+)
+for filepath in glob.glob(input_globstr):
+    # get hpgl id
+    hpgl_ids_all.append(re.match('.*(HPGL[0-9]+).*', filepath).groups()[0])
 
 # create subdirs based on matching parameters
 base_dir = os.path.join('build', subdir)
@@ -438,7 +451,7 @@ logging.info("# Command:\n%s" % " ".join(sys.argv))
 loggers = {}
 
 # setup sample-specific loggers
-for hpgl_id in hpgl_ids:
+for hpgl_id in hpgl_ids_all:
     loggers[hpgl_id] = {}
     build_dir = os.path.join('build', subdir, hpgl_id)
 
@@ -478,7 +491,23 @@ def check_for_bowtie_index():
     logging.info("# Command:\n" + " ".join(bowtie_cmd))
     ret = subprocess.call(bowtie_cmd)
 
+def check_for_genome_fasta():
+    """Checks to make sure the genome fasta exists and is available as a .fa
+    file; required by Tophat."""
+    genome = os.path.splitext(args.genome)[0]
+
+    # if index exists, stop here
+    if os.path.exists('%s.fa' % genome):
+        return
+    elif os.path.exists('%s.fasta' % genome):
+        # if .fasta file exists, but not .fa, create a symlink
+        logging.info("# Creating symlink to %s for Tophat" % args.genome)
+        os.symlink(genome + '.fasta', genome + '.fa')
+    else:
+        raise IOError("Missing genome file")
+
 @follows(check_for_bowtie_index)
+@follows(check_for_genome_fasta)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'build/%s/\2/ruffus/\2_\4.parse_reads' % subdir,
@@ -509,93 +538,11 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         *_R1_match_with_sl.fastq
         *_R1_match_without_sl.fastq
     """
+    # sample log
+    log = loggers[hpgl_id][read_num]
+
     # list to keep track of potential SL reads
     matches = []
-
-    # limit to matches of size min_length or greater
-    suffix = spliced_leader[-min_length:]
-
-    # Regex position anchors (optional)
-    re_prefix = ""
-    re_suffix = ""
-
-    if args.anchor_left:
-        re_prefix="^"
-    if args.anchor_right:
-        re_suffix="$"
-
-    # To speed things up, we first filter the reads to find all possible hits
-    # by grepping for reads containing at least `min_length` bases of the SL 
-    # sequence.
-
-    # If `num_mismatches` is set to 0, only exact matches are
-    # allowed. Otherwise a regex is compiled which allows one mismatch at any
-    # position in the first `min_length` bases. While this is not ideal (if
-    # the user has specified a larger value for `num_mismatches` and more than
-    # one occur in this region they will still get filtered out), this
-    # speeds things up significantly generally should not result in many real
-    # SL hits from being removed.
-    if args.num_mismatches == 0:
-        read_regex = re.compile(re_prefix + suffix + re_suffix)
-    else:
-        read_regex = re.compile('|'.join("%s%s.%s%s" % (
-            re_prefix, suffix[:i], suffix[i+1:], re_suffix
-        ) for i in range(len(suffix))))
-
-    # open fastq file
-    fastq = open(input_file)
-
-    # start sample log
-    loggers[hpgl_id][read_num].info(
-        "# Processing %s" % os.path.basename(input_file)
-    )
-
-    # total number of reads
-    num_reads = num_lines(input_file) / 4
-    loggers[hpgl_id][read_num].info(
-        "# Scanning %d reads for feature of interest" % (num_reads)
-    )
-
-    # open output string buffer (will write to compressed file later)
-    reads_without_sl = StringIO.StringIO()
-    reads_with_sl = StringIO.StringIO()
-
-    # Keep track of matched read IDs
-    read_ids = []
-
-    # find all reads containing at least `min_length` bases of the feature
-    # of interested
-    for i, read in enumerate(readfq(fastq)):
-        seq = read[SEQUENCE][:len(spliced_leader)]
-
-        # check for match
-        match = re.search(read_regex, seq)
-
-        # move on the next read if no match is found
-        if match is None:
-            continue
-
-        # otherwise add to output fastq
-        trimmed_read = [read[ID],
-                        read[SEQUENCE][match.end():],
-                        "+",
-                        read[QUALITY][match.end():]]
-        reads_without_sl.write("\n".join(trimmed_read) + "\n")
-
-        # also save untrimmed read (for finding false SL hits)
-        untrimmed_read = [read[ID],
-                          read[SEQUENCE],
-                          "+",
-                          read[QUALITY]]
-        reads_with_sl.write("\n".join(untrimmed_read) + "\n")
-
-        # save id
-        read_ids.append(read[ID])
-
-    # log numbers
-    loggers[hpgl_id][read_num].info(
-        "# Found %d reads with possible feature of interest" % len(read_ids)
-    )
 
     # Paired-end reads
     if os.path.isfile(input_file.replace('_R1_', '_R2_')):
@@ -622,20 +569,129 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         )
         output_with_sl = "%s_with_sl.fastq" % output_base
         output_without_sl = "%s_without_sl.fastq" % output_base
+    # limit to matches of size min_length or greater
+    #suffix = spliced_leader[-min_length:]
+
+    ## Regex position anchors (optional)
+    #re_prefix = ""
+    #re_suffix = ""
+
+    #if args.anchor_left:
+        #re_prefix="^"
+    #if args.anchor_right:
+        #re_suffix="$"
+
+    # To speed things up, we first filter the reads to find all possible hits
+    # by grepping for reads containing at least `min_length` bases of the SL 
+    # sequence.
+
+    # If `num_mismatches` is set to 0, only exact matches are
+    # allowed. Otherwise a regex is compiled which allows one mismatch at any
+    # position in the first `min_length` bases. While this is not ideal (if
+    # the user has specified a larger value for `num_mismatches` and more than
+    # one occur in this region they will still get filtered out), this
+    # speeds things up significantly generally should not result in many real
+    # SL hits from being removed.
+    #if args.num_mismatches == 0:
+        #read_regex_str = re_prefix + suffix + re_suffix
+    #else:
+        #read_regex_str = '|'.join("%s%s.%s%s" % (
+            #re_prefix, suffix[:i], suffix[i+1:], re_suffix
+        #) for i in range(len(suffix)))
+
+    # Disabling mismatches for now -- need to optimize (2014/02/18)
+
+    # Determine strings to match in reads
+    if args.anchor_left:
+        read_regex_str = '|'.join(["^" + spliced_leader[-x:] for x in
+            range(min_length, len(spliced_leader) + 1)])
+    else:
+        read_regex_str = spliced_leader[-min_length:]
+
+    # Compile regular expression
+    read_regex = re.compile(read_regex_str)
+
+    # total number of reads
+    num_reads = num_lines(input_file) / 4
+
+    # Start sample log
+    log.info("# Processing %s" % os.path.basename(input_file))
+    log.info("# Scanning %d reads for feature of interest" % (num_reads))
+    log.info("# Using Regex patten:\n %s" % read_regex_str)
+
+    # open output string buffer (will write to compressed file later)
+    reads_without_sl = StringIO.StringIO()
+    reads_with_sl = StringIO.StringIO()
+
+    # Keep track of matched read IDs
+    read_ids = []
+
+    # open paired end reads
+    if paired_end:
+        mated_reads = readfq(open(input_mated_reads))
+        mated_reads_buffer = StringIO.StringIO()
+
+    # find all reads containing at least `min_length` bases of the feature
+    # of interested
+    fastq = open(input_file)
+
+    for i, read in enumerate(readfq(fastq)):
+        # get mated read (for paired-end reads)
+        if paired_end:
+            mated_read = mated_reads.next()
+
+        # check for match
+        match = re.search(read_regex, read[SEQUENCE_IDX])
+
+        # move on the next read if no match is found
+        if match is None:
+            continue
+
+        # otherwise add to output fastq
+        trimmed_read = [read[ID_IDX],
+                        read[SEQUENCE_IDX][match.end():],
+                        "+",
+                        read[QUALITY_IDX][match.end():]]
+        reads_without_sl.write("\n".join(trimmed_read) + "\n")
+
+        # Also save complete (untrimmed) reads containing a portion of the SL 
+        # sequence as well. By mapping these reads to the genome we can find 
+        # false hits; i.e. reads that contain a part of the SL sequence that 
+        # is not actually from the SL.
+        untrimmed_read = [read[ID_IDX],
+                          read[SEQUENCE_IDX],
+                          "+",
+                          read[QUALITY_IDX]]
+        reads_with_sl.write("\n".join(untrimmed_read) + "\n")
+
+        # paired-end reads
+        if paired_end:
+            untrimmed_mated_read = [mated_read[ID_IDX],
+                                    mated_read[SEQUENCE_IDX],
+                                    "+",
+                                    mated_read[QUALITY_IDX]]
+            mated_reads_buffer write("\n".join(untrimmed_mated_read) + "\n")
+
+        # save id
+        read_ids.append(read[ID_IDX])
+
+    # log numbers
+    loggers[hpgl_id][read_num].info(
+        "# Found %d reads with possible feature of interest" % len(read_ids)
+    )
 
     # Create output directory
     output_dir = os.path.dirname(output_base)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, mode=0o755)
 
-    # Save complete (untrimmed) reads containing a portion of the SL sequence
-    # as well. By mapping these reads to the genome we can find false hits -- 
-    # i.e. reads that contain a part of the SL sequence that is not actually 
-    # from the SL.
-
     # write trimmed and untrimmed reads to fastq.gz
     gzip_str(output_without_sl, reads_without_sl)
     gzip_str(output_with_sl, reads_with_sl)
+
+    if paired_end:
+        qzip_str(output_mated_reads, mated_reads_buffer)
+        mated_reads_buffer.close()
 
     # clean up
     fastq.close()
@@ -645,15 +701,6 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     loggers[hpgl_id][read_num].info(
         "# Finished processing %s" % os.path.basename(input_file)
     )
-
-    # For PE reads, grab reads from matching pair
-    if paired_end:
-        loggers[hpgl_id][read_num].info(
-            "# Retrieving mated pair reads for %s" %
-            os.path.basename(input_mated_reads)
-        )
-        filter_fastq(input_mated_reads, output_mated_reads, read_ids,
-                     loggers[hpgl_id][read_num])
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -714,7 +761,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     num_reads_before = num_lines(r1_filepath) / 4
     loggers[hpgl_id][read_num].info(
         "# Removing %d false hits (%d total)" %
-        (num_reads_before - good_ids, num_reads_before)
+        (num_reads_before - len(good_ids), num_reads_before)
     )
 
     # Create true hits directory
@@ -846,7 +893,7 @@ def compute_coordinates(input_files, output_file):
     # Itereate over mapped reads
     for filepath in glob.glob(input_globstr):
         # get hpgl id
-        hpgl_id = re.match('.*(HPGL[0-9]+).*', x).groups()[0]
+        hpgl_id = re.match('.*(HPGL[0-9]+).*', filepath).groups()[0]
 
         # file to save results for individual sample
         base_dir = filepath[:re.search('tophat', filepath).start()]
