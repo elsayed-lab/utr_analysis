@@ -311,18 +311,21 @@ def gzip_str(filepath, strbuffer):
     fp.write(strbuffer.read())
     fp.close()
 
-def filter_fastq(infile, outfile, read_ids, log_handle):
+def filter_fastq(infile1, infile2, outfile1, outfile2, read_ids, log_handle):
     """Takes a filepath to a FASTQ file and returns a new version of the file
     which contains only reads with the specified ids"""
-    if infile.endswith('.gz'):
-        fastq = gzip.open(infile, 'rb')
+    if infile1.endswith('.gz'):
+        fastq1 = gzip.open(infile1, 'rb')
+        fastq2 = gzip.open(infile2, 'rb')
     else:
-        fastq = open(infile)
+        fastq1 = open(infile1)
+        fastq2 = open(infile2)
 
-    filtered_reads = StringIO.StringIO()
+    filtered_reads1 = StringIO.StringIO()
+    filtered_reads2 = StringIO.StringIO()
 
     # get number of reads to be searched
-    num_reads = num_lines(infile) / 4
+    num_reads = num_lines(infile1) / 4
     hundreth = int(round(num_reads / 100))
     show_progress = len(read_ids) >= 10000
 
@@ -341,8 +344,13 @@ def filter_fastq(infile, outfile, read_ids, log_handle):
         "# Filtering fastq for %d matched reads" % len(read_ids)
     )
 
+    # mated reads handle
+    mated_reads = readfq(fastq2)
+
     # iterate through each entry in fastq file
-    for i, read in enumerate(readfq(fastq), 1):
+    for i, read in enumerate(readfq(fastq1), 1):
+        mated_read = mated_reads.next()
+
         # log progress for large numbers of records
         if show_progress and (i % hundreth) == 0:
             log_handle.info('# %2d%%' % round(i / float(hundreth)))
@@ -358,8 +366,16 @@ def filter_fastq(infile, outfile, read_ids, log_handle):
 
         # if it is, add to filtered output
         if idx is not None:
-            fastq_entry = [read[ID_IDX], read[SEQUENCE_IDX], "+", read[QUALITY_IDX]]
-            filtered_reads.write("\n".join(fastq_entry) + "\n")
+            # read 1
+            fastq_entry1 = [read[ID_IDX], read[SEQUENCE_IDX], "+", 
+                            read[QUALITY_IDX]]
+            filtered_reads1.write("\n".join(fastq_entry1) + "\n")
+
+            # read 2
+            fastq_entry2 = [mated_read[ID_IDX], mated_read[SEQUENCE_IDX], "+", 
+                            mated_read[QUALITY_IDX]]
+            filtered_reads2.write("\n".join(fastq_entry2) + "\n")
+
 
             # remove id from list to reduce search space in future iterations
             read_ids.pop(idx)
@@ -534,9 +550,6 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         *_R2_match_R2_with_sl.fastq
         *_R2_match_R2_without_sl.fastq
         *_R2_match_R1.fastq
-    3. Single-end reads
-        *_R1_match_with_sl.fastq
-        *_R1_match_without_sl.fastq
     """
     # sample log
     log = loggers[hpgl_id][read_num]
@@ -544,31 +557,18 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     # list to keep track of potential SL reads
     matches = []
 
-    # Paired-end reads
-    if os.path.isfile(input_file.replace('_R1_', '_R2_')):
-        paired_end = True
+    # output string buffers and filepaths
+    output_base = 'build/%s/%s/fastq/possible_sl_reads/%s_%s_match' % (
+        subdir, hpgl_id, hpgl_id, read_num 
+    )
+    output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num)
+    output_without_sl = "%s_%s_without_sl.fastq" % (output_base, read_num)
 
-        # matching reads
-        output_base = 'build/%s/%s/fastq/possible_sl_reads/%s_%s_match' % (
-            subdir, hpgl_id, hpgl_id, read_num 
-        )
-        output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num)
-        output_without_sl = "%s_%s_without_sl.fastq" % (output_base, read_num)
+    # mated reads
+    read_num_other = "R1" if read_num == "R2" else "R2"
+    input_file_mated = input_file.replace(read_num, read_num_other)
+    output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other)
 
-        # mated reads
-        read_num_other = "R1" if read_num == "R2" else "R2"
-        input_mated_reads = input_file.replace(read_num, read_num_other)
-        output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other)
-
-    # Single-end reads
-    else:
-        paired_end = False
-
-        output_base = 'build/%s/%s/fastq/possible_sl_reads/%s_R1' % (
-            subdir, hpgl_id, hpgl_id
-        )
-        output_with_sl = "%s_with_sl.fastq" % output_base
-        output_without_sl = "%s_without_sl.fastq" % output_base
     # limit to matches of size min_length or greater
     #suffix = spliced_leader[-min_length:]
 
@@ -622,23 +622,22 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     # open output string buffer (will write to compressed file later)
     reads_without_sl = StringIO.StringIO()
     reads_with_sl = StringIO.StringIO()
+    mated_reads_buffer = StringIO.StringIO()
 
     # Keep track of matched read IDs
     read_ids = []
 
-    # open paired end reads
-    if paired_end:
-        mated_reads = readfq(open(input_mated_reads))
-        mated_reads_buffer = StringIO.StringIO()
-
     # find all reads containing at least `min_length` bases of the feature
     # of interested
     fastq = open(input_file)
+    fastq_mated = open(input_file_mated)
+
+    # iterate over mated reads at same time
+    mated_reads = readfq(fastq_mated)
 
     for i, read in enumerate(readfq(fastq)):
-        # get mated read (for paired-end reads)
-        if paired_end:
-            mated_read = mated_reads.next()
+        # get mated read
+        mated_read = mated_reads.next()
 
         # check for match
         match = re.search(read_regex, read[SEQUENCE_IDX])
@@ -665,20 +664,18 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         reads_with_sl.write("\n".join(untrimmed_read) + "\n")
 
         # paired-end reads
-        if paired_end:
-            untrimmed_mated_read = [mated_read[ID_IDX],
-                                    mated_read[SEQUENCE_IDX],
-                                    "+",
-                                    mated_read[QUALITY_IDX]]
-            mated_reads_buffer write("\n".join(untrimmed_mated_read) + "\n")
+        untrimmed_mated_read = [mated_read[ID_IDX],
+                                mated_read[SEQUENCE_IDX],
+                                "+",
+                                mated_read[QUALITY_IDX]]
+        mated_reads_buffer write("\n".join(untrimmed_mated_read) + "\n")
 
         # save id
         read_ids.append(read[ID_IDX])
 
     # log numbers
-    loggers[hpgl_id][read_num].info(
-        "# Found %d reads with possible feature of interest" % len(read_ids)
-    )
+    log.info("# Found %d reads with possible feature of interest" % 
+             len(read_ids))
 
     # Create output directory
     output_dir = os.path.dirname(output_base)
@@ -688,19 +685,16 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     # write trimmed and untrimmed reads to fastq.gz
     gzip_str(output_without_sl, reads_without_sl)
     gzip_str(output_with_sl, reads_with_sl)
-
-    if paired_end:
-        qzip_str(output_mated_reads, mated_reads_buffer)
-        mated_reads_buffer.close()
+    qzip_str(output_mated_reads, mated_reads_buffer)
 
     # clean up
     fastq.close()
+    fastq_mated.close()
     reads_without_sl.close()
     reads_with_sl.close()
+    mated_reads_buffer.close()
 
-    loggers[hpgl_id][read_num].info(
-        "# Finished processing %s" % os.path.basename(input_file)
-    )
+    log.info("# Finished processing %s" % os.path.basename(input_file))
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -721,13 +715,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     if (read_num == 'R1'):
         r1_filepath = ('%s/possible_sl_reads/%s_R1_match_R1_with_sl.fastq.gz' %
                        (basedir, hpgl_id))
-
-        # R2 filepath (for PE reads)
         r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
-
-        # If SE, set filepath to empty string
-        if not os.path.exists(r2_filepath):
-            r2_filepath = ""
     # R2
     else:
         r2_filepath = ('%s/possible_sl_reads/%s_R2_match_R2_with_sl.fastq.gz' %
@@ -771,24 +759,18 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # Create filtered versions of R1 (and R2) fastq files with only the un-
     # mapped reads
-
-    # Filter R1 reads
-    r1_infile = r1_filepath.replace('with_sl', 'without_sl')
-    r1_outfile = r1_infile.replace('possible', 'actual')
     loggers[hpgl_id][read_num].info(
-        "# Filtering matched reads to remove false hits (R1)"
+        "# Filtering matched reads to remove false hits"
     )
-    filter_fastq(r1_infile, r1_outfile, good_ids, loggers[hpgl_id][read_num])
 
-    # Filter R2 reads
-    if r2_filepath != "":
-        r2_infile = r2_filepath.replace('with_sl', 'without_sl')
-        r2_outfile = r2_infile.replace('possible', 'actual')
-        loggers[hpgl_id][read_num].info(
-            "# Filtering matched reads to remove false hits (R2)"
-        )
-        filter_fastq(r2_infile, r2_outfile, good_ids,
-                     loggers[hpgl_id][read_num])
+    # Filepaths
+    r1_infile = r1_filepath.replace('with_sl', 'without_sl')
+    r2_infile = r2_filepath.replace('with_sl', 'without_sl')
+    r1_outfile = r1_infile.replace('possible', 'actual')
+    r2_outfile = r2_infile.replace('possible', 'actual')
+
+    filter_fastq(r1_infile1, r2_infile,
+                 r1_outfile, r2_outfile, read_ids, log_handle)
 
     loggers[hpgl_id][read_num].info("# Finished removing false hits.")
 
