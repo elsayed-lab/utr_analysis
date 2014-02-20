@@ -240,7 +240,7 @@ def run_command(cmd, log_handle):
     if stderr:
         log_handle.error(stderr)
 
-    return prcoess.returncode
+    return process.returncode
 
 def sort_and_index(base_output, log_handle):
     """Sorts and indexes .bam files using samtools"""
@@ -399,8 +399,10 @@ def filter_fastq(infile1, infile2, outfile1, outfile2, read_ids, log_handle):
     log_handle.info(' # Done filtering')
 
     # write matching paired-end reads to compressed fastq
-    gzip_str(outfile, filtered_reads)
-    filtered_reads.close()
+    gzip_str(outfile1, filtered_reads1)
+    gzip_str(outfile2, filtered_reads2)
+    filtered_reads1.close()
+    filtered_reads2.close()
 
 #--------------------------------------
 # Main
@@ -553,14 +555,14 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     read, and whether (for the case of mated-pair reads) it is the left read
     or right read:
 
-    1. Paired-end, SL suffix in R1
-        *_R1_match_R1_with_sl.fastq
-        *_R1_match_R1_without_sl.fastq
-        *_R1_match_R2.fastq
-    2. Paired-end, SL suffix in R2
-        *_R2_match_R2_with_sl.fastq
-        *_R2_match_R2_without_sl.fastq
-        *_R2_match_R1.fastq
+    1. SL suffix in R1
+        *_R1_1_with_sl.fastq
+        *_R1_1_without_sl.fastq
+        *_R1_2.fastq
+    2. SL suffix in R2
+        *_R2_2_with_sl.fastq
+        *_R2_2_without_sl.fastq
+        *_R2_1.fastq
     """
     # sample log
     log = loggers[hpgl_id][read_num]
@@ -572,13 +574,13 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     output_base = 'build/%s/%s/fastq/possible_sl_reads/%s_%s_match' % (
         subdir, hpgl_id, hpgl_id, read_num 
     )
-    output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num)
-    output_without_sl = "%s_%s_without_sl.fastq" % (output_base, read_num)
+    output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num[-1])
+    output_without_sl = "%s_%s_without_sl.fastq" % (output_base, read_num[-1])
 
     # mated reads
     read_num_other = "R1" if read_num == "R2" else "R2"
     input_file_mated = input_file.replace(read_num, read_num_other)
-    output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other)
+    output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other[-1])
 
     # limit to matches of size min_length or greater
     #suffix = spliced_leader[-min_length:]
@@ -724,14 +726,14 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
-        r1_filepath = ('%s/possible_sl_reads/%s_R1_match_R1_with_sl.fastq.gz' %
+        r1_filepath = ('%s/possible_sl_reads/%s_R1_1_with_sl.fastq.gz' %
                        (basedir, hpgl_id))
-        r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
+        r2_filepath = r1_filepath.replace('1_with_sl', '2')
     # R2
     else:
-        r2_filepath = ('%s/possible_sl_reads/%s_R2_match_R2_with_sl.fastq.gz' %
+        r2_filepath = ('%s/possible_sl_reads/%s_R2_2_with_sl.fastq.gz' %
                        (basedir, hpgl_id))
-        r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
+        r1_filepath = r2_filepath.replace('2_with_sl', '1')
 
     # Map reads using Tophat
     # @TODO parameterize extra_args (except for --no-mixed in this case) to
@@ -780,8 +782,8 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     r1_outfile = r1_infile.replace('possible', 'actual')
     r2_outfile = r2_infile.replace('possible', 'actual')
 
-    filter_fastq(r1_infile, r2_infile,
-                 r1_outfile, r2_outfile, good_ids, log_handle)
+    filter_fastq(r1_infile, r2_infile, r1_outfile, r2_outfile,
+                 good_ids, loggers[hpgl_id][read_num])
 
     loggers[hpgl_id][read_num].info("# Finished removing false hits.")
 
@@ -805,12 +807,12 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
         r1_filepath = (
-            '%s/actual_sl_reads/%s_R1_match_R1_without_sl.fastq.gz' %
+            '%s/actual_sl_reads/%s_R1_1_without_sl.fastq.gz' %
             (basedir, hpgl_id)
         )
 
         # R2 filepath (for PE reads)
-        r2_filepath = r1_filepath.replace('R1_with_sl', 'R2')
+        r2_filepath = r1_filepath.replace('1_with_sl', '2')
 
         # If SE, set filepath to empty string
         if not os.path.exists(r2_filepath):
@@ -818,10 +820,10 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     # R2
     else:
         r2_filepath = (
-            '%s/actual_sl_reads/%s_R2_match_R2_without_sl.fastq.gz' %
+            '%s/actual_sl_reads/%s_R2_2_without_sl.fastq.gz' %
             (basedir, hpgl_id)
         )
-        r1_filepath = r2_filepath.replace('R2_with_sl', 'R1')
+        r1_filepath = r2_filepath.replace('2_with_sl', '1')
 
     # Map reads using Tophat
     #  --no-mixed ?
