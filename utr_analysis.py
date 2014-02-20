@@ -48,7 +48,6 @@ import sys
 import glob
 import gzip
 import pysam
-import pandas
 import random
 import logging
 import argparse
@@ -58,9 +57,6 @@ import textwrap
 import subprocess
 from ruffus import *
 from BCBio import GFF
-import matplotlib
-matplotlib.use('Agg')
-from matplotlib import pyplot as plt
 
 #--------------------------------------
 # FASTQ row indices
@@ -85,7 +81,7 @@ def parse_input():
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
         -f TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
         -g TrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff             \\
-        --build-directory tcruzi -m 12 -n 3
+        --build-directory build/tcruzi -m 12
     """)
 
     # Create ArgumentParser instance
@@ -99,7 +95,7 @@ def parse_input():
     parser.add_argument('-i', '--input-reads', required=True,
                         help='RNA-Seq FASTQ glob string')
     parser.add_argument('-d', '--build-directory', required=True,
-                        help='Top-level build directory name to use.')
+                        help='Directory to save output to')
     parser.add_argument('-f', '--fasta-genome', dest='genome', required=True,
                         help='Genome sequence FASTA filepath')
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
@@ -114,8 +110,8 @@ def parse_input():
                               'side of read'), action='store_true')
     parser.add_argument('-m', '--min-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
-    parser.add_argument('-n', '--num-mismatches', default=0, type=int,
-                        help='Number of mismatches to allow (default=0)')
+    #parser.add_argument('-n', '--num-mismatches', default=0, type=int,
+    #                    help='Number of mismatches to allow (default=0)')
     parser.add_argument('-w', '--window-size', default=10000, type=int,
                         help=('Number of bases up/downstream of read to look '
                               'for corresponding genes'))
@@ -426,16 +422,16 @@ analysis_type = ('spliced_leader' if args.spliced_leader is not None else
                  'poly-a')
 
 # create a unique build path for specified parameters
-subdir = os.path.join(
+build_dir = os.path.join(
     args.build_directory,
     analysis_type,
-    'mismatches-%d' % args.num_mismatches,
+    #'mismatches-%d' % args.num_mismatches,
     'minlength-%d' % args.min_length
 )
 if args.anchor_left:
-    subdir = os.path.join(subdir, 'anchor-left')
+    build_dir = os.path.join(build_dir, 'anchor-left')
 if args.anchor_right:
-    subdir = os.path.join(subdir, 'anchor-right')
+    build_dir = os.path.join(build_dir, 'anchor-right')
 
 # get a list of HPGL ids
 input_regex = re.compile(r'.*(HPGL[0-9]+).*')
@@ -450,22 +446,19 @@ for filename in glob.glob(args.input_reads):
 # list of ids including previously processed samples (used for final step)
 hpgl_ids_all = hpgl_ids
 input_globstr = (
-    'build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' % subdir
+    '%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' % build_dir
 )
 for filepath in glob.glob(input_globstr):
     # get hpgl id
     hpgl_ids_all.append(re.match('.*(HPGL[0-9]+).*', filepath).groups()[0])
 
 # create subdirs based on matching parameters
-base_dir = os.path.join('build', subdir)
-
 for hpgl_id in hpgl_ids:
     # create build directories
-    build_dir = os.path.join('build', subdir, hpgl_id)
-
     for d in ['fastq', 'ruffus', 'tophat']:
-        if not os.path.exists(os.path.join(build_dir, d)):
-            os.makedirs(os.path.join(build_dir, d), mode=0o755)
+        outdir = os.path.join(build_dir, hpgl_id, d)
+        if not os.path.exists(outdir):
+            os.makedirs(outdir, mode=0o755)
 
 # setup master logger
 log_format = '%(asctime)s %(message)s'
@@ -473,7 +466,7 @@ date_format = '%Y-%m-%d %I:%M:%S %p'
 formatter = logging.Formatter(log_format, datefmt=date_format)
 
 # determine log name to use
-master_log = get_next_log_name(os.path.join(base_dir, 'build.log'))
+master_log = get_next_log_name(os.path.join(build_dir, 'build.log'))
 
 logging.basicConfig(filename=master_log,
                     level=logging.INFO,
@@ -495,11 +488,10 @@ loggers = {}
 # setup sample-specific loggers
 for hpgl_id in hpgl_ids_all:
     loggers[hpgl_id] = {}
-    build_dir = os.path.join('build', subdir, hpgl_id)
 
     for read_num in ['R1', 'R2']:
         sample_log_name = get_next_log_name(
-            os.path.join(build_dir, '%s_%s.log' % (hpgl_id, read_num))
+            os.path.join(build_dir, hpgl_id, '%s_%s.log' % (hpgl_id, read_num))
         )
         loggers[hpgl_id][read_num] = logging.getLogger(hpgl_id + read_num)
         handler = logging.FileHandler(sample_log_name)
@@ -553,7 +545,7 @@ def check_for_genome_fasta():
 @follows(check_for_genome_fasta)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
-           r'build/%s/\2/ruffus/\2_\4.parse_reads' % subdir,
+           r'%s/\2/ruffus/\2_\4.parse_reads' % build_dir,
            r'\2', r'\3', r'\4', r'\5',
            args.spliced_leader, args.min_length)
 def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num, 
@@ -585,8 +577,8 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     matches = []
 
     # output string buffers and filepaths
-    output_base = 'build/%s/%s/fastq/possible_sl_reads/%s_%s_match' % (
-        subdir, hpgl_id, hpgl_id, read_num 
+    output_base = '%s/%s/fastq/possible_sl_reads/%s_%s_match' % (
+        build_dir, hpgl_id, hpgl_id, read_num 
     )
     output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num[-1])
     output_without_sl = "%s_%s_without_sl.fastq" % (output_base, read_num[-1])
@@ -731,12 +723,12 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
            r'\1/\2_\3.remove_false_hits',
            r'\2', r'\3')
 def remove_false_hits(input_file, output_file, hpgl_id, read_num):
-    output_dir = ('build/%s/%s/tophat/%s_false_hits' % (subdir, hpgl_id,
+    output_dir = ('%s/%s/tophat/%s_false_hits' % (build_dir, hpgl_id,
                                                         read_num))
     genome = os.path.splitext(args.genome)[0]
 
     # input read base directory
-    basedir = 'build/%s/%s/fastq' % (subdir, hpgl_id)
+    basedir = '%s/%s/fastq' % (build_dir, hpgl_id)
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
@@ -810,13 +802,13 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
-    output_dir = 'build/%s/%s/tophat/%s_sl_reads' % (subdir, hpgl_id, read_num)
+    output_dir = '%s/%s/tophat/%s_sl_reads' % (build_dir, hpgl_id, read_num)
     genome = os.path.splitext(args.genome)[0]
 
     loggers[hpgl_id][read_num].info("# Mapping filtered reads back to genome")
 
     # input read base directory
-    basedir = 'build/%s/%s/fastq' % (subdir, hpgl_id)
+    basedir = '%s/%s/fastq' % (build_dir, hpgl_id)
 
     # R1 filepath (including matched SL sequence)
     if (read_num == 'R1'):
@@ -890,15 +882,15 @@ def compute_coordinates(input_files, output_file):
     results = {}
 
     # Bam inputs
-    input_globstr = ('build/%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
-                     subdir)
+    input_globstr = ('%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
+                     build_dir)
 
     # Output: no genes nearby
-    no_nearby_genes = csv.writer(open('build/%s/no_matches.csv' % subdir, 'w'))
+    no_nearby_genes = csv.writer(open('%s/no_matches.csv' % build_dir, 'w'))
     no_nearby_genes.writerow(['read_id', 'chromosome', 'strand', 'position'])
 
     # Output: predicted site inside a CDS
-    inside_cds = csv.writer(open('build/%s/inside_cds.csv' % subdir, 'w'))
+    inside_cds = csv.writer(open('%s/inside_cds.csv' % build_dir, 'w'))
     inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
 
     # Itereate over mapped reads
@@ -1013,7 +1005,7 @@ def compute_coordinates(input_files, output_file):
             % num_no_nearby_genes)
 
     # Output filepath
-    coordinates_output = 'build/%s/sl_coordinates.csv' % (subdir)
+    coordinates_output = '%s/sl_coordinates.csv' % (build_dir)
     fp = open(coordinates_output, 'w')
 
     # Write csv header
@@ -1042,39 +1034,6 @@ def compute_coordinates(input_files, output_file):
     # clean up
     gff_fp.close()
     fp.close()
-
-#@follows(filter_reads)
-#def compute_read_statistics():
-    #"""Computes some basic stats about the distribution of the UTR feature
-    #in the RNA-Seq reads"""
-    #subdir = 'mismatches-%d_minlength-%d' % (args.num_mismatches, args.min_length)
-    #fp = open('build/02-combined_filtered_reads/%s/matching_reads_all_samples.csv' %
-              #subdir)
-
-    ## skip comments
-    #line = fp.readline()
-    #while line.startswith('#'):
-        #line = fp.readline()
-        #continue
-
-    ## col names
-    #colnames = line.strip().split(',')
-
-    ## load csv into a pandas dataframe
-    #df = pandas.read_csv(fp, header=None, names=colnames)
-    #fp.close()
-
-    ## summary statistics
-    #print("SL read length distribution:")
-    #print(df.groupby('end').size())
-    #print(df['end'].describe())
-
-    ## plot a histogram of the SL lengths captured in the RNA-Seq reads
-    #df.hist(column='end', bins=len(args.spliced_leader) - args.min_length)
-    #title_text = "SL fragment length distribution ($N=%d$, $\mu=%f$)"
-    #plt.title(title_text % (df['end'].size, df['end'].mean()))
-    ##plt.savefig('output/figures/%s/sl_length_distribution.png' % subdir)
-    #plt.savefig('sl_length_distribution.png' % subdir)
 
 # run pipeline
 if __name__ == "__main__":
