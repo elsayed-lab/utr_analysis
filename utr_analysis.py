@@ -404,6 +404,16 @@ def filter_fastq(infile1, infile2, outfile1, outfile2, read_ids, log_handle):
     filtered_reads1.close()
     filtered_reads2.close()
 
+get_next_log_name(base_name):
+    """Returns a filepath for the next highest log number"""
+    if not os.path.exists(base_name):
+        return base_name
+    else:
+        log_nums = [int(x.split('.').pop()) 
+                        for x in glob.glob("%s.*" % base_name)]
+        next_log_num = max(log_nums) + 1
+        return "%s.%d" % (base_name, next_log_num)
+
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -462,7 +472,10 @@ log_format = '%(asctime)s %(message)s'
 date_format = '%Y-%m-%d %I:%M:%S %p'
 formatter = logging.Formatter(log_format, datefmt=date_format)
 
-logging.basicConfig(filename=os.path.join(base_dir, 'build.log'),
+# determine log name to use
+master_log = get_next_log_name(os.path.join(base_dir, 'build.log'))
+
+logging.basicConfig(filename=master_log,
                     level=logging.INFO,
                     format=log_format,
                     datefmt=date_format)
@@ -485,12 +498,13 @@ for hpgl_id in hpgl_ids_all:
     build_dir = os.path.join('build', subdir, hpgl_id)
 
     for read_num in ['R1', 'R2']:
-        log_file = os.path.join(build_dir, '%s_%s.log' % (hpgl_id, read_num))
+        sample_log_name = get_next_log_name(
+            os.path.join(build_dir, '%s_%s.log' % (hpgl_id, read_num))
+        )
         loggers[hpgl_id][read_num] = logging.getLogger(hpgl_id + read_num)
-        handler = logging.FileHandler(log_file)
+        handler = logging.FileHandler(sample_log_name)
         handler.setFormatter(formatter)
         loggers[hpgl_id][read_num].addHandler(handler)
-
 
 #--------------------------------------
 # Ruffus tasks
