@@ -400,14 +400,14 @@ def filter_fastq(infile1, infile2, outfile1, outfile2, read_ids, log_handle):
     filtered_reads1.close()
     filtered_reads2.close()
 
-get_next_log_name(base_name):
+def get_next_log_name(base_name):
     """Returns a filepath for the next highest log number"""
     if not os.path.exists(base_name):
         return base_name
     else:
         log_nums = [int(x.split('.').pop()) 
                         for x in glob.glob("%s.*" % base_name)]
-        next_log_num = max(log_nums) + 1
+        next_log_num = max([0] + log_nums) + 1
         return "%s.%d" % (base_name, next_log_num)
 
 #--------------------------------------
@@ -432,6 +432,8 @@ if args.anchor_left:
     build_dir = os.path.join(build_dir, 'anchor-left')
 if args.anchor_right:
     build_dir = os.path.join(build_dir, 'anchor-right')
+else:
+    build_dir = os.path.join(build_dir, 'unanchored')
 
 # get a list of HPGL ids
 input_regex = re.compile(r'.*(HPGL[0-9]+).*')
@@ -577,7 +579,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     matches = []
 
     # output string buffers and filepaths
-    output_base = '%s/%s/fastq/possible_sl_reads/%s_%s_match' % (
+    output_base = '%s/%s/fastq/possible_sl_reads/%s_%s' % (
         build_dir, hpgl_id, hpgl_id, read_num 
     )
     output_with_sl = "%s_%s_with_sl.fastq" % (output_base, read_num[-1])
