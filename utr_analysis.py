@@ -430,7 +430,7 @@ build_dir = os.path.join(
 )
 if args.anchor_left:
     build_dir = os.path.join(build_dir, 'anchor-left')
-if args.anchor_right:
+elif args.anchor_right:
     build_dir = os.path.join(build_dir, 'anchor-right')
 else:
     build_dir = os.path.join(build_dir, 'unanchored')
@@ -491,14 +491,20 @@ loggers = {}
 for hpgl_id in hpgl_ids_all:
     loggers[hpgl_id] = {}
 
-    for read_num in ['R1', 'R2']:
-        sample_log_name = get_next_log_name(
-            os.path.join(build_dir, hpgl_id, '%s_%s.log' % (hpgl_id, read_num))
-        )
-        loggers[hpgl_id][read_num] = logging.getLogger(hpgl_id + read_num)
-        handler = logging.FileHandler(sample_log_name)
-        handler.setFormatter(formatter)
-        loggers[hpgl_id][read_num].addHandler(handler)
+    for analysis in ['SL', 'PolyA']:
+        loggers[hpgl_id][analysis] = {}
+
+        for read_num in ['R1', 'R2']:
+            sample_log_name = get_next_log_name(
+                os.path.join(build_dir, hpgl_id, '%s_%s_%s.log' % (hpgl_id,
+                    analysis, read_num))
+            )
+            loggers[hpgl_id][analysis][read_num] = logging.getLogger(
+                hpgl_id + analysis + read_num
+            )
+            handler = logging.FileHandler(sample_log_name)
+            handler.setFormatter(formatter)
+            loggers[hpgl_id][analysis][read_num].addHandler(handler)
 
 #--------------------------------------
 # Ruffus tasks
@@ -573,7 +579,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         *_R2_1.fastq
     """
     # sample log
-    log = loggers[hpgl_id][read_num]
+    log = loggers[hpgl_id]['SL'][read_num]
 
     # list to keep track of potential SL reads
     matches = []
@@ -746,11 +752,11 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Map reads using Tophat
     # @TODO parameterize extra_args (except for --no-mixed in this case) to
     # allow for easier customization
-    loggers[hpgl_id][read_num].info(
+    loggers[hpgl_id]['SL'][read_num].info(
         "# Mapping full reads containing feature of interest to find false\n"
         "# hits (reads that correspond to actual features in the genome"
     )
-    ret = run_tophat(output_dir, genome, loggers[hpgl_id][read_num],
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id]['SL'][read_num],
                      r1_filepath, r2_filepath,
                      extra_args='--mate-inner-dist 170 --no-mixed')
 
@@ -768,7 +774,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # number of reads before filtering
     num_reads_before = num_lines(r1_filepath) / 4
-    loggers[hpgl_id][read_num].info(
+    loggers[hpgl_id]['SL'][read_num].info(
         "# Removing %d false hits (%d total)" %
         (num_reads_before - len(good_ids), num_reads_before)
     )
@@ -780,7 +786,7 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
 
     # Create filtered versions of R1 (and R2) fastq files with only the un-
     # mapped reads
-    loggers[hpgl_id][read_num].info(
+    loggers[hpgl_id]['SL'][read_num].info(
         "# Filtering matched reads to remove false hits"
     )
 
@@ -791,9 +797,9 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     r2_outfile = r2_infile.replace('possible', 'actual')
 
     filter_fastq(r1_infile, r2_infile, r1_outfile, r2_outfile,
-                 good_ids, loggers[hpgl_id][read_num])
+                 good_ids, loggers[hpgl_id]['SL'][read_num])
 
-    loggers[hpgl_id][read_num].info("# Finished removing false hits.")
+    loggers[hpgl_id]['SL'][read_num].info("# Finished removing false hits.")
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -807,7 +813,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     output_dir = '%s/%s/tophat/%s_sl_reads' % (build_dir, hpgl_id, read_num)
     genome = os.path.splitext(args.genome)[0]
 
-    loggers[hpgl_id][read_num].info("# Mapping filtered reads back to genome")
+    loggers[hpgl_id]['SL'][read_num].info("# Mapping filtered reads back to genome")
 
     # input read base directory
     basedir = '%s/%s/fastq' % (build_dir, hpgl_id)
@@ -835,7 +841,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 
     # Map reads using Tophat
     #  --no-mixed ?
-    ret = run_tophat(output_dir, genome, loggers[hpgl_id][read_num],
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id]['SL'][read_num],
                  r1_filepath, r2_filepath,
                  extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
 
@@ -846,7 +852,7 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
         )
         sys.exit()
 
-    loggers[hpgl_id][read_num].info("# Finished mapping hits to genome")
+    loggers[hpgl_id]['SL'][read_num].info("# Finished mapping hits to genome")
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -996,13 +1002,13 @@ def compute_coordinates(input_files, output_file):
                 results[chromosome][closest_gene][pos]['count'] += 1
 
         # record number of good and bad reads
-        loggers[hpgl_id][read_num].info(
+        loggers[hpgl_id]['SL'][read_num].info(
             "# Found %d reads with predicted acceptor site at expected location"
             % num_good)
-        loggers[hpgl_id][read_num].info(
+        loggers[hpgl_id]['SL'][read_num].info(
             "# Found %d reads with predicted acceptor site inside a known CDS"
             % num_inside_cds)
-        loggers[hpgl_id][read_num].info(
+        loggers[hpgl_id]['SL'][read_num].info(
             "# Found %d reads with predicted acceptor site not proximal to any CDS"
             % num_no_nearby_genes)
 
