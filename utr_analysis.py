@@ -30,15 +30,14 @@ TODO
     - distribution of UTR lengths
     - average number of accepter sites per CDS
 - Compare above statistics across samples
-- Adding logging (use logging module)
 
 Testing
 -------
 
 utr_analysis.py \
     -i "$RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq" \
-    -f $REF/tcruzi_clbrener/genome/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
-    -g $REF/tcruzi_clbrener/annotation/tc_esmer/TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff      \
+    -f $REF/tcruzi_clbrener/genome/tc_esmer/TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
+    -g $REF/tcruzi_clbrener/annotation/tc_esmer/TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like.gff      \
     -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
 """
 import os
@@ -79,9 +78,9 @@ def parse_input():
     ./utr_analysis.py                                              \\
         -i "$RAW/tcruzir21/*/processed/*.filtered.fastq"           \\
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
-        -f TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
-        -g TrypDB-6.0_TcruziCLBrenerEsmeraldo-like.gff             \\
-        --build-directory build/tcruzi -m 12
+        -f TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
+        -g TrypDB-7.0_TcruziCLBrenerEsmeraldo-like.gff             \\
+        --build-directory build/tcruzi --min-sl-length 12
     """)
 
     # Create ArgumentParser instance
@@ -103,19 +102,15 @@ def parse_input():
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
                         required=True, help='Spliced leader DNA sequence', 
                         default=None)
-    parser.add_argument('-l', '--left-anchor-sl-reads', dest='anchor_left',
-                        help=('Require SL sequence to be at left '
-                              'side of reads'), action='store_true')
-    parser.add_argument('-r', '--right-anchor-polya-reads', 
-                        dest='anchor_right',
-                        help=('Require Poly-A tail sequence to be at right '
-                              'side of read'), action='store_true')
+    parser.add_argument('-e', '--exclude-internal-matches',
+                        help=('Only allow matches with the feature at the '
+                              'expected end of a read (upstream for SL and'
+                              'downstream for Poly-A tail)'),
+                        action='store_true')
     parser.add_argument('-m', '--min-sl-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-p', '--min-polya-length', default=10, type=int,
                         help='Minimum length of Poly-A match (default=10)')
-    #parser.add_argument('-n', '--num-mismatches', default=0, type=int,
-    #                    help='Number of mismatches to allow (default=0)')
     parser.add_argument('-w', '--window-size', default=10000, type=int,
                         help=('Number of bases up/downstream of read to look '
                               'for corresponding genes'))
@@ -123,7 +118,7 @@ def parse_input():
                         help='Number of threads to use.')
     parser.add_argument('-a', '--author', help='Author contact name', 
                         default='')
-    parser.add_argument('-e', '--email', help='Author contact email address',
+    parser.add_argument('-c', '--email', help='Author contact email address',
                         default='')
 
     # Parse arguments
@@ -431,23 +426,17 @@ args = parse_input()
 sl_build_dir = os.path.join(
     args.build_directory,
     'spliced_leader',
-    'minlength-%d' % args.min_sl_length
+    'minlength-%d' % args.min_sl_length,
+    'anchored' if args.exclude_internal_matches else 'unanchored'
 )
-if args.anchor_left:
-    sl_build_dir = os.path.join(sl_build_dir, 'anchor-left')
-else:
-    sl_build_dir = os.path.join(sl_build_dir, 'unanchored')
 
 # poly-A tail sub-directory
 polya_build_dir = os.path.join(
     args.build_directory,
     'poly-a',
-    'minlength-%d' % args.min_polya_length
+    'minlength-%d' % args.min_polya_length,
+    'anchored' if args.exclude_internal_matches else 'unanchored'
 )
-if args.anchor_right:
-    polya_build_dir = os.path.join(polya_build_dir, 'anchor-right')
-else:
-    polya_build_dir = os.path.join(polaa_build_dir, 'unanchored')
 
 # get a list of HPGL ids
 input_regex = re.compile(r'.*(HPGL[0-9]+).*')
@@ -570,14 +559,14 @@ def check_for_genome_fasta():
 @follows(check_for_genome_fasta)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
-           r'%s/\2/ruffus/\2_\4.parse_reads' % sl_build_dir,
+           r'%s/\2/ruffus/\2_\4.find_sl_reads' % sl_build_dir,
            r'\2', r'\3', r'\4', r'\5',
            args.spliced_leader, args.min_sl_length)
-def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num, 
+def find_sl_reads(input_file, output_file, hpgl_id, file_prefix, read_num, 
                 file_suffix, spliced_leader, min_sl_length):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
-    return those containing the feature of interest (SL or polyA tail).
+    return those containing a subsequence of the spliced leader.
 
     Output files
     ------------
@@ -613,40 +602,8 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     input_file_mated = input_file.replace(read_num, read_num_other)
     output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other[-1])
 
-    # limit to matches of size min__sl_length or greater
-    #suffix = spliced_leader[-min_sl_length:]
-
-    ## Regex position anchors (optional)
-    #re_prefix = ""
-    #re_suffix = ""
-
-    #if args.anchor_left:
-        #re_prefix="^"
-    #if args.anchor_right:
-        #re_suffix="$"
-
-    # To speed things up, we first filter the reads to find all possible hits
-    # by grepping for reads containing at least `min_sl_length` bases of the SL 
-    # sequence.
-
-    # If `num_mismatches` is set to 0, only exact matches are
-    # allowed. Otherwise a regex is compiled which allows one mismatch at any
-    # position in the first `min_sl_length` bases. While this is not ideal (if
-    # the user has specified a larger value for `num_mismatches` and more than
-    # one occur in this region they will still get filtered out), this
-    # speeds things up significantly generally should not result in many real
-    # SL hits from being removed.
-    #if args.num_mismatches == 0:
-        #read_regex_str = re_prefix + suffix + re_suffix
-    #else:
-        #read_regex_str = '|'.join("%s%s.%s%s" % (
-            #re_prefix, suffix[:i], suffix[i+1:], re_suffix
-        #) for i in range(len(suffix)))
-
-    # Disabling mismatches for now -- need to optimize (2014/02/18)
-
     # Determine strings to match in reads
-    if args.anchor_left:
+    if args.exclude_internal_matches:
         read_regex_str = '|'.join(["^" + spliced_leader[-x:] for x in
             range(min_sl_length, len(spliced_leader) + 1)])
     else:
@@ -660,7 +617,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
 
     # Start sample log
     log.info("# Processing %s" % os.path.basename(input_file))
-    log.info("# Scanning %d reads for feature of interest" % (num_reads))
+    log.info("# Scanning %d reads for spliced leader sequence" % (num_reads))
     log.info("# Using Regex patten:\n %s" % read_regex_str)
 
     # open output string buffer (will write to compressed file later)
@@ -718,7 +675,7 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         read_ids.append(read[ID_IDX])
 
     # log numbers
-    log.info("# Found %d reads with possible feature of interest" % 
+    log.info("# Found %d reads with possible spliced leader fragment" % 
              len(read_ids))
 
     # Create output directory
@@ -743,8 +700,151 @@ def parse_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-@transform(parse_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).parse_reads'),
+@follows(check_for_bowtie_index)
+@follows(check_for_genome_fasta)
+@transform(args.input_reads,
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
+           r'\2', r'\3', r'\4', r'\5',
+           args.min_polya_length)
+def find_polya_reads(input_file, output_file, hpgl_id, file_prefix, read_num, 
+                    file_suffix, min_polya_length):
+    """
+    Loads a collection of RNA-Seq reads and filters the reads so as to only
+    return those containing the a putative poly-A tail sequence.
+
+    @TODO: look for T's on left, or A's on right
+
+    Output files
+    ------------
+    There are three possible sets of output files for this function depending
+    on whether the input read comes from a mated-pair of reads or a single
+    read, and whether (for the case of mated-pair reads) it is the left read
+    or right read:
+
+    1. SL suffix in R1
+        *_R1_1_with_polya.fastq
+        *_R1_1_without_polya.fastq
+        *_R1_2.fastq
+    2. SL suffix in R2
+        *_R2_2_with_pola.fastq
+        *_R2_2_without_polya.fastq
+        *_R2_1.fastq
+    """
+    # sample log
+    log = loggers[hpgl_id]['PolyA'][read_num]
+
+    # list to keep track of potential SL reads
+    matches = []
+
+    # output string buffers and filepaths
+    output_base = '%s/%s/fastq/possible_polya_reads/%s_%s' % (
+        polya_build_dir, hpgl_id, hpgl_id, read_num 
+    )
+    output_with_polya = "%s_%s_with_polya.fastq" % (output_base, read_num[-1])
+    output_without_polya = "%s_%s_without_polya.fastq" % (output_base, read_num[-1])
+
+    # mated reads
+    read_num_other = "R1" if read_num == "R2" else "R2"
+    input_file_mated = input_file.replace(read_num, read_num_other)
+    output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other[-1])
+
+    # Compile regular expression
+    read_regex_str = 'T{%d,}|A{%d,}' % (min_polya_length, min_polya_length)
+
+    if args.exclude_internal_matches:
+        read_regex_str = "^" + read_regex_str + "$"
+
+    # total number of reads
+    num_reads = num_lines(input_file) / 4
+
+    # Start sample log
+    log.info("# Processing %s" % os.path.basename(input_file))
+    log.info("# Scanning %d reads for Poly-A tail" % (num_reads))
+    log.info("# Using Regex patten:\n %s" % read_regex_str)
+
+    # open output string buffer (will write to compressed file later)
+    reads_without_polya = StringIO.StringIO()
+    reads_with_polya = StringIO.StringIO()
+    mated_reads_buffer = StringIO.StringIO()
+
+    # Keep track of matched read IDs
+    read_ids = []
+
+    # find all reads containing at least `min_polya_length` bases of the feature
+    # of interested
+    fastq = open(input_file)
+    fastq_mated = open(input_file_mated)
+
+    # iterate over mated reads at same time
+    mated_reads = readfq(fastq_mated)
+
+    for i, read in enumerate(readfq(fastq)):
+        # get mated read
+        mated_read = mated_reads.next()
+
+        # check for match
+        match = re.search(read_regex, read[SEQUENCE_IDX])
+
+        # move on the next read if no match is found
+        if match is None:
+            continue
+
+        # otherwise add to output fastq
+        trimmed_read = [read[ID_IDX],
+                        read[SEQUENCE_IDX][match.end():],
+                        "+",
+                        read[QUALITY_IDX][match.end():]]
+        reads_without_polya.write("\n".join(trimmed_read) + "\n")
+
+        # Also save complete (untrimmed) reads containing a portion of the SL 
+        # sequence as well. By mapping these reads to the genome we can find 
+        # false hits; i.e. reads that contain a part of the SL sequence that 
+        # is not actually from the SL.
+        untrimmed_read = [read[ID_IDX],
+                          read[SEQUENCE_IDX],
+                          "+",
+                          read[QUALITY_IDX]]
+        reads_with_polya.write("\n".join(untrimmed_read) + "\n")
+
+        # paired-end reads
+        untrimmed_mated_read = [mated_read[ID_IDX],
+                                mated_read[SEQUENCE_IDX],
+                                "+",
+                                mated_read[QUALITY_IDX]]
+        mated_reads_buffer.write("\n".join(untrimmed_mated_read) + "\n")
+
+        # save id
+        read_ids.append(read[ID_IDX])
+
+    # log numbers
+    log.info("# Found %d reads with possible poly-A tail fragment" % 
+             len(read_ids))
+
+    # Create output directory
+    output_dir = os.path.dirname(output_base)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, mode=0o755)
+
+    # write trimmed and untrimmed reads to fastq.gz
+    gzip_str(output_without_polya, reads_without_polya)
+    gzip_str(output_with_polya, reads_with_polya)
+    gzip_str(output_mated_reads, mated_reads_buffer)
+
+    # clean up
+    fastq.close()
+    fastq_mated.close()
+    reads_without_polya.close()
+    reads_with_polya.close()
+    mated_reads_buffer.close()
+
+    log.info("# Finished processing %s" % os.path.basename(input_file))
+
+    # Let Ruffus know we are done
+    open(output_file, 'w').close()
+
+@transform(find_sl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
            r'\1/\2_\3.remove_false_hits',
            r'\2', r'\3')
 def remove_false_hits(input_file, output_file, hpgl_id, read_num):
