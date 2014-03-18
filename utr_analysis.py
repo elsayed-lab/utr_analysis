@@ -703,10 +703,18 @@ sl_build_dir = os.path.join(
     'anchored' if args.exclude_internal_matches else 'unanchored'
 )
 
-# poly-A tail sub-directory
+# Poly(A) tail sub-directory
 polya_build_dir = os.path.join(
     args.build_directory,
     'poly-a',
+    'minlength-%d' % args.min_polya_length,
+    'anchored' if args.exclude_internal_matches else 'unanchored'
+)
+
+# Poly(A) tail reverse complement sub-directory
+polyt_build_dir = os.path.join(
+    args.build_directory,
+    'poly-t',
     'minlength-%d' % args.min_polya_length,
     'anchored' if args.exclude_internal_matches else 'unanchored'
 )
@@ -733,7 +741,7 @@ for filepath in glob.glob(input_globstr):
 # create subdirs based on matching parameters
 for hpgl_id in hpgl_ids:
     # create build directories
-    for base_dir in [sl_build_dir, polya_build_dir]:
+    for base_dir in [sl_build_dir, polya_build_dir, polyt_build_dir]:
         for sub_dir in ['fastq', 'ruffus', 'tophat']:
             outdir = os.path.join(base_dir, hpgl_id, sub_dir)
             if not os.path.exists(outdir):
@@ -768,11 +776,16 @@ loggers = {}
 for hpgl_id in hpgl_ids_all:
     loggers[hpgl_id] = {}
 
-    for analysis in ['sl', 'polya']:
+    for analysis in ['sl', 'polya', 'polyt']:
         loggers[hpgl_id][analysis] = {}
 
         for read_num in ['R1', 'R2']:
-            bdir = sl_build_dir if analysis == 'sl' else polya_build_dir
+            if analysis == 'sl':
+                bdir = sl_build_dir
+            elif analysis == 'polya':
+                bdir = polya_build_dir
+            else:
+                bdir = polyt_build_dir
 
             sample_log_name = get_next_log_name(
                 os.path.join(bdir, hpgl_id, '%s_%s_%s.log' % (hpgl_id,
@@ -785,11 +798,19 @@ for hpgl_id in hpgl_ids_all:
             handler.setFormatter(formatter)
             loggers[hpgl_id][analysis][read_num].addHandler(handler)
 
-#--------------------------------------
+#-----------------------------------------------------------------------------
 # Ruffus tasks
-#--------------------------------------
+#-----------------------------------------------------------------------------
 #
-# Input regex explanation:
+# Input regular expression
+#
+# To keep track of Ruffus's progress, empty sentinel files are created in
+# the ruffus subdirectory of each sample. The sentinel filenames are encoded
+# with some information about the currently running task, which are parsed
+# using a regular expression. For the first main task (parse_sl_reads), the 
+# input is not a sentinel file, but an input fastq filepath. The various
+# componenets of the regular expression used in this case is provided as
+# an example below.
 #
 # Ex. "$RAW/tcruzir21/HPGL0121/processed/HPGL0121_R1_filtered.fastq"
 #
@@ -799,6 +820,7 @@ for hpgl_id in hpgl_ids_all:
 # \4 - R1/R2
 # \5 - _anything_after_read_num_
 #
+#-----------------------------------------------------------------------------
 def check_for_bowtie_index():
     """check for bowtie 2 indices and create if needed"""
     genome = os.path.splitext(args.genome)[0]
@@ -828,6 +850,13 @@ def check_for_genome_fasta():
     else:
         raise IOError("Missing genome file")
 
+#-----------------------------------------------------------------------------
+# Step 1: Find reads with sequence of interest
+#
+# Finds reads containing a minimum number of bases of the feature of interest;
+# either a portion of the spliced leader (SL) sequence, or a Poly(A) or Poly(T)
+# tract in the expected location for a polyadenylation event.
+#-----------------------------------------------------------------------------
 @follows(check_for_bowtie_index)
 @follows(check_for_genome_fasta)
 @transform(args.input_reads,
@@ -859,28 +888,41 @@ def find_sl_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
            r'\2', r'\3')
 def find_polya_reads(input_file, output_file, hpgl_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
-    # Match reads with at least n A's or T's at either the beginning or end
-    # of the read; For now we will always require matches to be at the end of
-    # the read.
-    polya_regex = '^[AT]{%d,}|[AT]{%d,}$' % (min_polya_length, min_polya_length)
+    # Match reads with at least n A's at the end of the read; For now we will 
+    # always require matches to be at the end of the read.
+    polya_regex = 'A{%d,}$' % (args.min_polya_length)
 
-    #if args.exclude_internal_matches:
-    #    read_regex_str = "^" + read_regex_str + "$"
     find_sequence(input_file, 'polya', polya_regex, polya_build_dir,
                   hpgl_id, read_num)
-
-    # Let Ruffus know we are done
     open(output_file, 'w').close()
-
 
 @transform(find_polya_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polya_reads'),
+           r'\1/\2_\3.find_polyt_reads',
+           r'\2', r'\3')
+def find_polyt_reads(input_file, output_file, hpgl_id, read_num):
+    """Matches reads with possible Poly(T) tail fragment"""
+    # Match reads with at least n T's at the beginning of the read; For now 
+    # we will always require matches to be at the beginning of the read.
+    polyt_regex = 'T{%d,}$' % (args.min_polya_length)
+    find_sequence(input_file, 'polyt', polyt_regex, polyt_build_dir,
+                  hpgl_id, read_num)
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
+# Step 2: Remove false hits
+#
+# In this step, the matching reads from step 1 are mapped as-is: any reads
+# which successfully map in this way can then be attributed to sequences found
+# in the actual genome, and not a trans-splicing or polyadenylation event, and
+# are filtered out.
+#-----------------------------------------------------------------------------
+@transform(find_polyt_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polyt_reads'),
            r'\1/\2_\3.remove_sl_false_hits',
            r'\2', r'\3')
 def remove_sl_false_hits(input_file, output_file, hpgl_id, read_num):
     remove_false_hits('sl', sl_build_dir, hpgl_id, read_num)
-
-    # Let Ruffus know we are done
     open(output_file, 'w').close()
 
 @transform(remove_sl_false_hits,
@@ -890,19 +932,31 @@ def remove_sl_false_hits(input_file, output_file, hpgl_id, read_num):
 def remove_polya_false_hits(input_file, output_file, hpgl_id, read_num):
     """Remove Poly(A) reads that map to genome before trimming"""
     remove_false_hits('polya', polya_build_dir, hpgl_id, read_num)
-
-    # Let Ruffus know we are done
     open(output_file, 'w').close()
 
 @transform(remove_polya_false_hits,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
+           r'\1/\2_\3.remove_polyt_false_hits',
+           r'\2', r'\3')
+def remove_polyt_false_hits(input_file, output_file, hpgl_id, read_num):
+    """Remove Poly(T) reads that map to genome before trimming"""
+    remove_false_hits('polyt', polyt_build_dir, hpgl_id, read_num)
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
+# Step 3: Map trimmed reads
+#
+# Trims the matched sequences from reads and map to genome. For reads where
+# the matched sequence comes from a trans-splicing or polyadenylation event,
+# the location of the mapped trimmed read is where the addition took place.
+#-----------------------------------------------------------------------------
+@transform(remove_polyt_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polyt_false_hits'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
     map_reads('sl', sl_build_dir, hpgl_id, read_num)
-
-    # Let Ruffus know we are done
     open(output_file, 'w').close()
 
 @transform(map_sl_reads,
@@ -912,12 +966,28 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
 def map_polya_reads(input_file, output_file, hpgl_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
     map_reads('polya', polya_build_dir, hpgl_id, read_num)
-
-    # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-@collate(map_sl_reads,
-       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
+@transform(map_polya_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polya_reads'),
+           r'\1/\2_\3.map_polyt_reads',
+           r'\2', r'\3')
+def map_polyt_reads(input_file, output_file, hpgl_id, read_num):
+    """Maps the filtered Poly(T) reads back to the genome"""
+    map_reads('polyt', polyt_build_dir, hpgl_id, read_num)
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
+# Step 4: Compute UTR coordinates
+#
+# In this step, the locations of mapped trimmed reads above are used to
+# determine likely trans-splicing and polyadenylation acceptor sites in the
+# genome for the processed input samples. A couple of additional filtering
+# steps are based to ensure that the putative acceptor sites lie in acceptable
+# locations (e.g. not inside a CDS.)
+#-----------------------------------------------------------------------------
+@collate(map_polyt_reads,
+       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
        r'\1/\2_.compute_coordinates')
 def compute_coordinates(input_files, output_file):
     """Maps the filtered spliced-leader containing reads back to the genome.
