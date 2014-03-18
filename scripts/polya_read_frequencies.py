@@ -17,12 +17,19 @@ from Bio import SeqIO,Seq
 
 def main():
     # Samples to query
-    #base_dir = "/cbcb/lab/nelsayed/raw_data/lminfectome"
-    #hpgl_id = "HPGL0075"  # procyclic (pathogen only)
+    base_dir = "/cbcb/lab/nelsayed/raw_data/lminfectome"
+    hpgl_id = "HPGL0075"  # procyclic (pathogen only)
 
-    # Samples to query
-    base_dir = "/cbcb/lab/nelsayed/raw_data/tcruzir21"
-    hpgl_id = "HPGL0250"  # trypomastigote (pathogen only)
+    # L. major SL sequence and its reverse complement
+    sl = "AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG"
+    reverse_sl = "CAATAAAGTACAGAAACTGATACTTATATAGCGTTAGTT"
+
+    # T. cruzi SL sequence and reverse complement
+    #sl = "AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG"
+    #reverse_sl = "CAATATAGTACAGAAACTGTATCAATAATAGCGTTAGTT"
+
+    #base_dir = "/cbcb/lab/nelsayed/raw_data/tcruzir21"
+    #hpgl_id = "HPGL0250"  # trypomastigote (pathogen only)
     reads = glob.glob(os.path.join(base_dir, hpgl_id, 'processed/*.fastq'))
 
     # Genome location
@@ -30,20 +37,22 @@ def main():
                       "TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta")
 
     # regular expressions
-    min_length = 10
+    min_length = 16
 
     search_patterns = {
-        "polya_left": re.compile("^" + "A" * min_length),
-        "polyt_left": re.compile("^" + "T" * min_length),
-        "polya_right": re.compile("A" * min_length + "$"),
-        "polyt_right": re.compile("T" * min_length + "$")
+        "polya_left": "^" + "A" * min_length,
+        "polyt_left": "^" + "T" * min_length,
+        "polya_right": "A" * min_length + "$",
+        "polyt_right": "T" * min_length + "$",
+        "sl_left": "^" + sl[-min_length:],
+        "rcsl_right": reverse_sl[:min_length] + "$"
      }
 
     # count occurances of each sequence in reads
     for name,regex in search_patterns.items():
         print("Processing %s" % name)
-        outdir = os.path.join('output', 'tcruzi_hpgl0250', name)
-        count_seq_hits(regex, reads, tc, outdir, 1E6)
+        outdir = os.path.join('output', 'lmajor_hpgl0075', name)
+        count_seq_hits(re.compile(regex), reads, tc, outdir)
 
 def count_seq_hits(regex, reads, genome, outdir, max_reads=float('inf')):
     """Counts the number of occurances of a specified sequence in a collection
@@ -91,15 +100,19 @@ def count_seq_hits(regex, reads, genome, outdir, max_reads=float('inf')):
             genome_match = False
 
             for chromosome in chromosomes:
+                # full read
                 if chromosome.seq.count(read) > 0:
                     with_feature.append(read_id)
                     genome_match = True
+                # full read (reverse complement)
                 elif chromosome.seq.count(rc) > 0:
                     with_feature_rc.append(read_id)
                     genome_match = True
+                # trimmed read
                 elif chromosome.seq.count(trimmed_read) > 0:
                     without_feature.append(read_id)
                     genome_match = True
+                # trimmed read (reverse complement)
                 elif chromosome.seq.count(trimmed_rc) > 0:
                     without_feature_rc.append(read_id)
                     genome_match = True
