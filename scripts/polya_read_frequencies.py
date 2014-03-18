@@ -42,8 +42,8 @@ def main():
     # count occurances of each sequence in reads
     for name,regex in search_patterns.items():
         print("Processing %s" % name)
-        outdir = os.path.join('output', name)
-        count_seq_hits(regex, reads, tc, outdir, 10E6)
+        outdir = os.path.join('output', 'tcruzi_hpgl0250', name)
+        count_seq_hits(regex, reads, tc, outdir, 1E6)
 
 def count_seq_hits(regex, reads, genome, outdir, max_reads=float('inf')):
     """Counts the number of occurances of a specified sequence in a collection
@@ -88,21 +88,29 @@ def count_seq_hits(regex, reads, genome, outdir, max_reads=float('inf')):
 
             # if found, see if it appears in the genome as-is, or when trimmed
             # to remove matched feature
+            genome_match = False
+
             for chromosome in chromosomes:
                 if chromosome.seq.count(read) > 0:
                     with_feature.append(read_id)
-                    continue
+                    genome_match = True
                 elif chromosome.seq.count(rc) > 0:
                     with_feature_rc.append(read_id)
-                    continue
+                    genome_match = True
                 elif chromosome.seq.count(trimmed_read) > 0:
                     without_feature.append(read_id)
-                    continue
+                    genome_match = True
                 elif chromosome.seq.count(trimmed_rc) > 0:
                     without_feature_rc.append(read_id)
-                    continue
+                    genome_match = True
+
+                # stop checking once match is found in genome
+                if genome_match is True:
+                    break
+
             # no match
-            no_match.append(read_id)
+            if not genome_match:
+                no_match.append(read_id)
 
     # Save output
     if not os.path.exists(outdir):
