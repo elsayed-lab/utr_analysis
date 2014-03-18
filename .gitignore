@@ -3,4 +3,5 @@
 *.png
 .ruffus_history.sqlite
 build
+scripts/output
 igv_session.xml

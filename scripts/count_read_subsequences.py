@@ -17,43 +17,51 @@ import glob
 import re
 
 def main():
+    # Samples to query
+    #base_dir = "/cbcb/lab/nelsayed/raw_data/lminfectome"
+    #hpgl_id = "HPGL0075"  # procyclic (pathogen only)
+
     # L. major SL sequence and its reverse complement
-    sl = "AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG"
-    reverse_sl = "CAATAAAGTACAGAAACTGATACTTATATAGCGTTAGTT"
+    #sl = "AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG"
+    #reverse_sl = "CAATAAAGTACAGAAACTGATACTTATATAGCGTTAGTT"
+
+    # Samples to query
+    base_dir = "/cbcb/lab/nelsayed/raw_data/tcruzir21"
+    hpgl_id = "HPGL0250"  # trypomastigote (pathogen only)
+
+    # T. cruzi SL sequence and reverse complement
+    sl = "AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG"
+    reverse_sl = "CAATATAGTACAGAAACTGTATCAATAATAGCGTTAGTT"
 
     # Min suffix length
     min_length = 10
 
     # Number of reads to query (can set a limit to speed things up)
-    max_reads = 1000
-
-    # Samples to query
-    base_dir = "/cbcb/lab/nelsayed/raw_data/lminfectome"
-    hpgl_id = "HPGL0075"
+    max_reads = float('inf')
 
     # list to keep track of counts for each subsequence length
     starting_counter = {i:0 for i in range(min_length, len(sl) + 1)}
 
     counts = {
         'sl': {
-            'left': starting_counter,
-            'right': starting_counter,
-            'any': starting_counter
+            'left': starting_counter.copy(),
+            'right': starting_counter.copy(),
+            'any': starting_counter.copy()
         },
         'reverse_sl': {
-            'left': starting_counter,
-            'right': starting_counter,
-            'any': starting_counter
+            'left': starting_counter.copy(),
+            'right': starting_counter.copy(),
+            'any': starting_counter.copy()
         },
         'polya': {
-            'left': starting_counter,
-            'right': starting_counter,
-            'any': starting_counter
+            'left': starting_counter.copy(),
+            'right': starting_counter.copy(),
+            'any': starting_counter.copy()
         },
         'polyt': {
-            'left': starting_counter,
-            'right': starting_counter,
-            'any': starting_counter
+            'left': starting_counter.copy(),
+            'right': starting_counter.copy(),
+            'any': starting_counter.copy()
         }
     }
 
@@ -66,14 +74,12 @@ def main():
     reverse_prefixes = [reverse_sl[:n] for n in range(min_length, len(sl) + 1)]
 
     for i, sl_suffix in enumerate(sl_suffixes, min_length):
-        print("Scanning for subsequences of length %d" % i)
-
         # Spliced leader regexes
         features = {
             'sl': sl_suffix,
             'reverse_sl': reverse_prefixes[i - min_length],
             'polya': "A" * i,
-            'polyt': "A" * i
+            'polyt': "T" * i
         }
 
         # Iterate through sample files
@@ -92,11 +98,11 @@ def main():
                         # if so, check at ends as well
                         if read[1].startswith(features[feature]):
                             counts[feature]['left'][i] += 1
-                        elif read[1].endswith(features[feature]):
+                        if read[1].endswith(features[feature]):
                             counts[feature]['right'][i] += 1
 
     # Print header
-    header_fields = []
+    header_fields = ['length']
     for feature in counts:
         for pos in counts[feature]:
             header_fields.append("_".join([feature, pos]))
@@ -104,10 +110,10 @@ def main():
 
     # Print rows
     for i in range(min_length, len(sl) + 1):
-        row = []
+        row = [str(i)]
         for feature in counts:
             for pos in counts[feature]:
-                row.append(counts[feature][pos][i])
+                row.append(str(counts[feature][pos][i]))
         print(",".join(row))
 
 # FASTQ parser

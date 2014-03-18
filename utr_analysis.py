@@ -731,7 +731,7 @@ def find_polya_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
         *_R1_1_without_polya.fastq
         *_R1_2.fastq
     2. SL suffix in R2
-        *_R2_2_with_pola.fastq
+        *_R2_2_with_polya.fastq
         *_R2_2_without_polya.fastq
         *_R2_1.fastq
     """
@@ -754,10 +754,18 @@ def find_polya_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
     output_mated_reads = "%s_%s.fastq" % (output_base, read_num_other[-1])
 
     # Compile regular expression
-    read_regex_str = 'T{%d,}|A{%d,}' % (min_polya_length, min_polya_length)
+    #read_regex_str = 'T{%d,}|A{%d,}' % (min_polya_length, min_polya_length)
 
-    if args.exclude_internal_matches:
-        read_regex_str = "^" + read_regex_str + "$"
+    # Match reads with at least n A's or T's at either the beginning or end
+    # of the read; For now we will always require matches to be at the end of
+    # the read.
+    read_regex_str = '^[AT]{%d,}|[AT]{%d,}$' % (min_polya_length, min_polya_length)
+
+    #if args.exclude_internal_matches:
+    #    read_regex_str = "^" + read_regex_str + "$"
+
+    # compile regex
+    read_regex = re.compile(read_regex_str)
 
     # total number of reads
     num_reads = num_lines(input_file) / 4
@@ -795,10 +803,25 @@ def find_polya_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
             continue
 
         # otherwise add to output fastq
-        trimmed_read = [read[ID_IDX],
-                        read[SEQUENCE_IDX][match.end():],
-                        "+",
-                        read[QUALITY_IDX][match.end():]]
+
+        # Poly(A)/Poly(T) tract at beginning of read
+        if match.start() <= (len(read[SEQUENCE_IDX]) - match.end()):
+            trimmed_read = [read[ID_IDX],
+                            read[SEQUENCE_IDX][match.end():],
+                            "+",
+                            read[QUALITY_IDX][match.end():]]
+        else:
+            # Poly(A)/Poly(T) tract at the end of read
+            trimmed_read = [read[ID_IDX],
+                            read[SEQUENCE_IDX][:match.start()],
+                            "+",
+                            read[QUALITY_IDX][:match.start()]]
+
+        # skip reads that are less than 36 bases after trimming
+        if len(trimmed_read[SEQUENCE_IDX]) < 36:
+            continue
+
+        # Otherwise add trimmed read to output
         reads_without_polya.write("\n".join(trimmed_read) + "\n")
 
         # Also save complete (untrimmed) reads containing a portion of the SL 
@@ -849,9 +872,9 @@ def find_polya_reads(input_file, output_file, hpgl_id, file_prefix, read_num,
 
 @transform(find_sl_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
-           r'\1/\2_\3.remove_false_hits',
+           r'\1/\2_\3.remove_sl_false_hits',
            r'\2', r'\3')
-def remove_false_hits(input_file, output_file, hpgl_id, read_num):
+def remove_sl_false_hits(input_file, output_file, hpgl_id, read_num):
     output_dir = ('%s/%s/tophat/%s_false_hits' % (sl_build_dir, hpgl_id,
                                                         read_num))
     genome = os.path.splitext(args.genome)[0]
@@ -925,8 +948,86 @@ def remove_false_hits(input_file, output_file, hpgl_id, read_num):
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-@transform(remove_false_hits,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_false_hits'),
+@transform(find_polya_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polya_reads'),
+           r'\1/\2_\3.remove_polya_false_hits',
+           r'\2', r'\3')
+def remove_polya_false_hits(input_file, output_file, hpgl_id, read_num):
+    output_dir = ('%s/%s/tophat/%s_false_hits' % (polya_build_dir, hpgl_id,
+                                                        read_num))
+    genome = os.path.splitext(args.genome)[0]
+
+    # input read base directory
+    basedir = '%s/%s/fastq' % (polya_build_dir, hpgl_id)
+
+    # R1 filepath (including matched Poly(A)/Poly(T) sequence)
+    if (read_num == 'R1'):
+        r1_filepath = ('%s/possible_polya_reads/%s_R1_1_with_polya.fastq.gz' %
+                       (basedir, hpgl_id))
+        r2_filepath = r1_filepath.replace('1_with_polya', '2')
+    # R2
+    else:
+        r2_filepath = ('%s/possible_polya_reads/%s_R2_2_with_polya.fastq.gz' %
+                       (basedir, hpgl_id))
+        r1_filepath = r2_filepath.replace('2_with_polya', '1')
+
+    # Map reads using Tophat
+    # @TODO parameterize extra_args (except for --no-mixed in this case) to
+    # allow for easier customization
+    loggers[hpgl_id]['PolyA'][read_num].info(
+        "# Mapping full reads containing Poly(A)/Poly(T) tract to find false\n"
+        "# hits (reads that correspond to actual features in the genome"
+    )
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id]['PolyA'][read_num],
+                     r1_filepath, r2_filepath,
+                     extra_args='--mate-inner-dist 170 --no-mixed')
+
+    # Make sure tophat succeeded
+    if ret != 0:
+        logging.error(
+            "# Error running tophat 1/2! %s (%s)" % (hpgl_id, read_num)
+        )
+        sys.exit()
+
+    # Get ids of actual Poly(A)-containing reads (those that failed to map when
+    # the Poly(A) sequence was included).
+    sam = pysam.Samfile(os.path.join(output_dir, 'unmapped.bam'), 'rb')
+    good_ids = [x.qname for x in sam]
+
+    # number of reads before filtering
+    num_reads_before = num_lines(r1_filepath) / 4
+    loggers[hpgl_id]['PolyA'][read_num].info(
+        "# Removing %d false hits (%d total)" %
+        (num_reads_before - len(good_ids), num_reads_before)
+    )
+
+    # Create true hits directory
+    hits_dir = os.path.join(basedir, 'actual_polya_reads')
+    if not os.path.exists(hits_dir):
+        os.makedirs(hits_dir, mode=0o755)
+
+    # Create filtered versions of R1 (and R2) fastq files with only the un-
+    # mapped reads
+    loggers[hpgl_id]['PolyA'][read_num].info(
+        "# Filtering matched reads to remove false hits"
+    )
+
+    # Filepaths
+    r1_infile = r1_filepath.replace('with_polya', 'without_polya')
+    r2_infile = r2_filepath.replace('with_polya', 'without_polya')
+    r1_outfile = r1_infile.replace('possible', 'actual')
+    r2_outfile = r2_infile.replace('possible', 'actual')
+
+    filter_fastq(r1_infile, r2_infile, r1_outfile, r2_outfile,
+                 good_ids, loggers[hpgl_id]['PolyA'][read_num])
+
+    loggers[hpgl_id]['PolyA'][read_num].info("# Finished removing false hits.")
+
+    # Let Ruffus know we are done
+    open(output_file, 'w').close()
+
+@transform(remove_sl_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_sl_false_hits'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, hpgl_id, read_num):
@@ -974,6 +1075,60 @@ def map_sl_reads(input_file, output_file, hpgl_id, read_num):
         sys.exit()
 
     loggers[hpgl_id]['SL'][read_num].info("# Finished mapping hits to genome")
+
+    # Let Ruffus know we are done
+    open(output_file, 'w').close()
+
+@transform(remove_polya_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
+           r'\1/\2_\3.map_polya_reads',
+           r'\2', r'\3')
+def map_polya_reads(input_file, output_file, hpgl_id, read_num):
+    """Maps the filtered Poly(A)-containing reads back to the genome"""
+    output_dir = '%s/%s/tophat/%s_polya_reads' % (polya_build_dir,
+                                                  hpgl_id, read_num)
+    genome = os.path.splitext(args.genome)[0]
+
+    loggers[hpgl_id]['PolyA'][read_num].info("# Mapping filtered reads back to genome")
+
+    # input read base directory
+    basedir = '%s/%s/fastq' % (polya_build_dir, hpgl_id)
+
+    # R1 filepath (including matched Poly(A) sequence)
+    if (read_num == 'R1'):
+        r1_filepath = (
+            '%s/actual_polya_reads/%s_R1_1_without_polya.fastq.gz' %
+            (basedir, hpgl_id)
+        )
+
+        # R2 filepath (for PE reads)
+        r2_filepath = r1_filepath.replace('1_with_polya', '2')
+
+        # If SE, set filepath to empty string
+        if not os.path.exists(r2_filepath):
+            r2_filepath = ""
+    # R2
+    else:
+        r2_filepath = (
+            '%s/actual_polya_reads/%s_R2_2_without_polya.fastq.gz' %
+            (basedir, hpgl_id)
+        )
+        r1_filepath = r2_filepath.replace('2_with_polya', '1')
+
+    # Map reads using Tophat
+    #  --no-mixed ?
+    ret = run_tophat(output_dir, genome, loggers[hpgl_id]['PolyA'][read_num],
+                 r1_filepath, r2_filepath,
+                 extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
+
+    # Make sure tophat succeeded
+    if ret != 0:
+        logging.error(
+            "# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num)
+        )
+        sys.exit()
+
+    loggers[hpgl_id]['PolyA'][read_num].info("# Finished mapping hits to genome")
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()

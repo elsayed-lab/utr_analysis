@@ -12,6 +12,10 @@ and poly-A tail acceptor sites.
 The pipeline makes use of Tophat for mapping reads, and Ruffus for pipeline
 flow management.
 
+For more information on the development of this pipeline and motivation for
+some of the design decisions, see my [research in progress presenation from
+2013/12/20](http://www.umiacs.umd.edu/~keith/research/presentations/2013-12-20_RIP_UTR_Boundaries_Analysis/README.html).
+
 ## Input
 
 - RNA-Seq reads (fastq)
@@ -33,12 +37,10 @@ frequency for acceptor sites.
 
 1. Given SL sequence, find all paired reads containing >= n bases of the SL
    sequence (current default n=10).
-2. Remove reads where matching sequence is internal (SL must be at either end
-   of a read)
-   - UPDATE: This may not be the case! It appears that many valid SL read
-   contain unrelated sequence at the left of the read (adapter?) that make this
-   filtering step overly stringent.
-   - TODO: Check to see if Trimming adapter sequence improves this picture.
+2. Remove reads where matching sequence is internal (Optional; although in
+   theory all SL-containing reads should have the SL fragment at the upstream
+   end of the read, in practice there are many chimeric reads with unrelated
+   fragments further upstream resulting in valid internal SL sequences.)
 3. Remove SL portion of sequence and map back to original genome -- site of
    mapping indicates location of splice acceptor site.
 
