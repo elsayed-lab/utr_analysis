@@ -629,6 +629,59 @@ def remove_false_hits(feature_name, build_dir, hpgl_id, read_num):
 
     loggers[hpgl_id][feature_name][read_num].info("# Finished removing false hits.")
 
+def map_reads(feature_name, build_dir, hpgl_id, read_num):
+    """Maps the filtered reads back to the genome"""
+    output_dir = '%s/%s/tophat/%s_%s_reads' % (
+        build_dir, hpgl_id, read_num, feature_name
+    )
+    genome = os.path.splitext(args.genome)[0]
+
+    loggers[hpgl_id][feature_name][read_num].info(
+        "# Mapping filtered reads back to genome"
+    )
+
+    # input read base directory
+    basedir = '%s/%s/fastq' % (build_dir, hpgl_id)
+
+    # R1 filepath (including matched sequence)
+    if (read_num == 'R1'):
+        r1_filepath = (
+            '%s/actual_%s_reads/%s_R1_1_without_%s.fastq.gz' %
+            (basedir, feature_name, hpgl_id, feature_name)
+        )
+
+        # R2 filepath (for PE reads)
+        r2_filepath = r1_filepath.replace('1_with_%s' % feature_name, '2')
+
+        # If SE, set filepath to empty string
+        if not os.path.exists(r2_filepath):
+            r2_filepath = ""
+    # R2
+    else:
+        r2_filepath = (
+            '%s/actual_%s_reads/%s_R2_2_without_%s.fastq.gz' %
+            (basedir, feature_name, hpgl_id, feature_name)
+        )
+        r1_filepath = r2_filepath.replace('2_with_%s' % feature_name, '1')
+
+    # Map reads using Tophat
+    #  --no-mixed ?
+    ret = run_tophat(output_dir, genome,
+                 loggers[hpgl_id][feature_name][read_num],
+                 r1_filepath, r2_filepath,
+                 extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
+
+    # Make sure tophat succeeded
+    if ret != 0:
+        logging.error(
+            "# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num)
+        )
+        sys.exit()
+
+    loggers[hpgl_id][feature_name][read_num].info(
+        "# Finished mapping hits to genome"
+    )
+
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -847,103 +900,18 @@ def remove_polya_false_hits(input_file, output_file, hpgl_id, read_num):
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, hpgl_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
-    output_dir = '%s/%s/tophat/%s_sl_reads' % (sl_build_dir, hpgl_id, read_num)
-    genome = os.path.splitext(args.genome)[0]
-
-    loggers[hpgl_id]['sl'][read_num].info("# Mapping filtered reads back to genome")
-
-    # input read base directory
-    basedir = '%s/%s/fastq' % (sl_build_dir, hpgl_id)
-
-    # R1 filepath (including matched SL sequence)
-    if (read_num == 'R1'):
-        r1_filepath = (
-            '%s/actual_sl_reads/%s_R1_1_without_sl.fastq.gz' %
-            (basedir, hpgl_id)
-        )
-
-        # R2 filepath (for PE reads)
-        r2_filepath = r1_filepath.replace('1_with_sl', '2')
-
-        # If SE, set filepath to empty string
-        if not os.path.exists(r2_filepath):
-            r2_filepath = ""
-    # R2
-    else:
-        r2_filepath = (
-            '%s/actual_sl_reads/%s_R2_2_without_sl.fastq.gz' %
-            (basedir, hpgl_id)
-        )
-        r1_filepath = r2_filepath.replace('2_with_sl', '1')
-
-    # Map reads using Tophat
-    #  --no-mixed ?
-    ret = run_tophat(output_dir, genome, loggers[hpgl_id]['sl'][read_num],
-                 r1_filepath, r2_filepath,
-                 extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
-
-    # Make sure tophat succeeded
-    if ret != 0:
-        logging.error(
-            "# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num)
-        )
-        sys.exit()
-
-    loggers[hpgl_id]['sl'][read_num].info("# Finished mapping hits to genome")
+    map_reads('sl', sl_build_dir, hpgl_id, read_num)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-@transform(remove_polya_false_hits,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
+@transform(map_sl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
            r'\1/\2_\3.map_polya_reads',
            r'\2', r'\3')
 def map_polya_reads(input_file, output_file, hpgl_id, read_num):
-    """Maps the filtered Poly(A)-containing reads back to the genome"""
-    output_dir = '%s/%s/tophat/%s_polya_reads' % (polya_build_dir,
-                                                  hpgl_id, read_num)
-    genome = os.path.splitext(args.genome)[0]
-
-    loggers[hpgl_id]['polya'][read_num].info("# Mapping filtered reads back to genome")
-
-    # input read base directory
-    basedir = '%s/%s/fastq' % (polya_build_dir, hpgl_id)
-
-    # R1 filepath (including matched Poly(A) sequence)
-    if (read_num == 'R1'):
-        r1_filepath = (
-            '%s/actual_polya_reads/%s_R1_1_without_polya.fastq.gz' %
-            (basedir, hpgl_id)
-        )
-
-        # R2 filepath (for PE reads)
-        r2_filepath = r1_filepath.replace('1_with_polya', '2')
-
-        # If SE, set filepath to empty string
-        if not os.path.exists(r2_filepath):
-            r2_filepath = ""
-    # R2
-    else:
-        r2_filepath = (
-            '%s/actual_polya_reads/%s_R2_2_without_polya.fastq.gz' %
-            (basedir, hpgl_id)
-        )
-        r1_filepath = r2_filepath.replace('2_with_polya', '1')
-
-    # Map reads using Tophat
-    #  --no-mixed ?
-    ret = run_tophat(output_dir, genome, loggers[hpgl_id]['polya'][read_num],
-                 r1_filepath, r2_filepath,
-                 extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
-
-    # Make sure tophat succeeded
-    if ret != 0:
-        logging.error(
-            "# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num)
-        )
-        sys.exit()
-
-    loggers[hpgl_id]['polya'][read_num].info("# Finished mapping hits to genome")
+    """Maps the filtered poly-adenylated reads back to the genome"""
+    map_reads('polya', polya_build_dir, hpgl_id, read_num)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
