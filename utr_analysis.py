@@ -277,13 +277,43 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     """
     Uses Tophat to map reads with the specified settings.
 
-    @NOTE 2014/02/06 -- Tophat 2.0.10 fails for some reads when attempting
-    to use more than one thread. For now, just perform the mapping
-    using a single-thread to be safe...
+    Several useful Tophat parameters have been included as keyword arguments,
+    along with their default settings for Tophat 2.
+
+    The documentation for these and other useful parameters for this script are
+    included below for convenience.
+
+    -N/--read-mismatches
+        Final read alignments having more than these many mismatches are 
+        discarded. The default is 2.
+
+    -x/--transcriptome-max-hits
+        Maximum number of mappings allowed for a read, when aligned to the 
+        transcriptome (any reads found with more then this number of mappings
+        will be discarded).
+
+    -p/--num-threads <int>
+        Use this many threads to align reads. The default is 1.
+
+    -g/--max-multihits <int>
+        Instructs TopHat to allow up to this many alignments to the reference
+        for a given read, and choose the alignments based on their alignment
+        scores if there are more than this number. The default is 20 for read
+        mapping. Unless you use --report-secondary-alignments, TopHat will
+        report the alignments with the best alignment score. If there are more
+        alignments with the same score than this number, TopHat will randomly
+        report only this many alignments. In case of using
+        --report-secondary-alignments, TopHat will try to report alignments up
+        to this option value, and TopHat may randomly output some of the
+        alignments with the same score to meet this number.
     """
     # create output directory
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, mode=0o755)
+
+    # @NOTE 2014/02/06 -- Tophat 2.0.10 fails for some reads when attempting
+    # to use more than one thread. For now, just perform the mapping
+    # using a single-thread to be safe...
 
     # build command
     cmd = "tophat --num-threads %d --max-multihits %d %s -o %s %s %s %s" % (
@@ -536,7 +566,7 @@ def find_sequence(input_file, feature_name, feature_regex, build_dir, hpgl_id,
 
     # log numbers
     log.info("# Found %d reads with possible %s fragment" % 
-             len(read_ids), feature_name)
+             (len(read_ids), feature_name))
 
     # Create output directory
     output_dir = os.path.dirname(output_base)
@@ -801,26 +831,6 @@ for hpgl_id in hpgl_ids_all:
 #-----------------------------------------------------------------------------
 # Ruffus tasks
 #-----------------------------------------------------------------------------
-#
-# Input regular expression
-#
-# To keep track of Ruffus's progress, empty sentinel files are created in
-# the ruffus subdirectory of each sample. The sentinel filenames are encoded
-# with some information about the currently running task, which are parsed
-# using a regular expression. For the first main task (parse_sl_reads), the 
-# input is not a sentinel file, but an input fastq filepath. The various
-# componenets of the regular expression used in this case is provided as
-# an example below.
-#
-# Ex. "$RAW/tcruzir21/HPGL0121/processed/HPGL0121_R1_filtered.fastq"
-#
-# \1 - directory
-# \2 - HPGLxxxx
-# \3 - _anything_between_id_and_read_num_
-# \4 - R1/R2
-# \5 - _anything_after_read_num_
-#
-#-----------------------------------------------------------------------------
 def check_for_bowtie_index():
     """check for bowtie 2 indices and create if needed"""
     genome = os.path.splitext(args.genome)[0]
@@ -857,35 +867,54 @@ def check_for_genome_fasta():
 # either a portion of the spliced leader (SL) sequence, or a Poly(A) or Poly(T)
 # tract in the expected location for a polyadenylation event.
 #-----------------------------------------------------------------------------
+
+# Input regular expression
+#
+# To keep track of Ruffus's progress, empty sentinel files are created in
+# the ruffus subdirectory of each sample. The sentinel filenames are encoded
+# with some information about the currently running task, which are parsed
+# using a regular expression. For the first main task (parse_sl_reads), the 
+# input is not a sentinel file, but an input fastq filepath. The various
+# componenets of the regular expression used in this case is provided as
+# an example below.
+#
+# Ex. "$RAW/tcruzir21/HPGL0121/processed/HPGL0121_R1_filtered.fastq"
+#
+# \1 - directory
+# \2 - HPGLxxxx
+# \3 - _anything_between_id_and_read_num_
+# \4 - R1/R2
+# \5 - _anything_after_read_num_
 @follows(check_for_bowtie_index)
 @follows(check_for_genome_fasta)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_sl_reads' % sl_build_dir,
-           r'\2', r'\3', r'\4', r'\5',
-           args.spliced_leader, args.min_sl_length)
-def find_sl_reads(input_file, output_file, hpgl_id, file_prefix, read_num, 
-                file_suffix, spliced_leader, min_sl_length):
+           r'\2', r'\4')
+def find_sl_reads(input_file, output_file, hpgl_id, read_num):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing a subsequence of the spliced leader.
     """
     # Determine strings to match in reads
     if args.exclude_internal_matches:
-        sl_regex = '|'.join(["^" + spliced_leader[-x:] for x in
-                             range(min_sl_length, len(spliced_leader) + 1)])
+        sl_regex = '|'.join(
+            ["^" + args.spliced_leader[-x:] for x in 
+             range(args.min_sl_length, len(args.spliced_leader) + 1)]
+        )
     else:
-        sl_regex = spliced_leader[-min_sl_length:]
+        sl_regex = args.spliced_leader[-args.min_sl_length:]
 
     find_sequence(input_file, 'sl', sl_regex, sl_build_dir, hpgl_id, read_num)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-@transform(find_sl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
-           r'\1/\2_\3.find_polya_reads',
-           r'\2', r'\3')
+@follows(find_sl_reads)
+@transform(args.input_reads,
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
+           r'\2', r'\4')
 def find_polya_reads(input_file, output_file, hpgl_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
     # Match reads with at least n A's at the end of the read; For now we will 
@@ -896,10 +925,11 @@ def find_polya_reads(input_file, output_file, hpgl_id, read_num):
                   hpgl_id, read_num)
     open(output_file, 'w').close()
 
-@transform(find_polya_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polya_reads'),
-           r'\1/\2_\3.find_polyt_reads',
-           r'\2', r'\3')
+@follows(find_polya_reads)
+@transform(args.input_reads,
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
+           r'\2', r'\4')
 def find_polyt_reads(input_file, output_file, hpgl_id, read_num):
     """Matches reads with possible Poly(T) tail fragment"""
     # Match reads with at least n T's at the beginning of the read; For now 
