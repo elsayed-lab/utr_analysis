@@ -17,7 +17,7 @@ from Bio import SeqIO,Seq
 
 def main():
     # Select species and sample to query
-    target = 'lmajor' # 'tcruzi'
+    target = 'tcruzi' # 'lmajor'
 
     if target == 'lmajor':
         # Samples to query
@@ -56,13 +56,19 @@ def main():
     # regular expressions
     min_length = 16
 
+    # spliced leader regular expressions
+    sl_regex = '|'.join(["^" + sl[-x:] for x in range(min_length, len(sl) + 1)])
+    reverse_sl_regex = '|'.join(
+        [reverse_sl[-x:] + "$" for x in range(min_length, len(reverse_sl) + 1)]
+    )
+
     search_patterns = {
-        "polya_left": "^" + "A" * min_length,
-        "polyt_left": "^" + "T" * min_length,
-        "polya_right": "A" * min_length + "$",
-        "polyt_right": "T" * min_length + "$",
-        "sl_left": "^" + sl[-min_length:],
-        "rcsl_right": reverse_sl[:min_length] + "$"
+        "polya_left": "^A{%d,}" % min_length,
+        "polyt_left": "^T{%d,}" % min_length,
+        "polya_right": "A{%d,}$" % min_length,
+        "polyt_right": "T{%d,}$" % min_length,
+        "sl_left": sl_regex,
+        "rcsl_right": reverse_sl_regex
      }
 
     # count occurances of each sequence in reads
