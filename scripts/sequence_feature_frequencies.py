@@ -16,25 +16,42 @@ import re
 from Bio import SeqIO,Seq
 
 def main():
-    # Samples to query
-    base_dir = "/cbcb/lab/nelsayed/raw_data/lminfectome"
-    hpgl_id = "HPGL0075"  # procyclic (pathogen only)
+    # Select species and sample to query
+    target = 'lmajor' # 'tcruzi'
 
-    # L. major SL sequence and its reverse complement
-    sl = "AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG"
-    reverse_sl = "CAATAAAGTACAGAAACTGATACTTATATAGCGTTAGTT"
+    if target == 'lmajor':
+        # Samples to query
+        base_dir = "/cbcb/lab/nelsayed/raw_data/lminfectome"
+        hpgl_id = "HPGL0075"  # procyclic (pathogen only)
 
-    # T. cruzi SL sequence and reverse complement
-    #sl = "AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG"
-    #reverse_sl = "CAATATAGTACAGAAACTGTATCAATAATAGCGTTAGTT"
+        # output directory
+        outdir = os.path.join('output', 'lmajor_hpgl0075')
 
-    #base_dir = "/cbcb/lab/nelsayed/raw_data/tcruzir21"
-    #hpgl_id = "HPGL0250"  # trypomastigote (pathogen only)
+        # Genome
+        genome = os.path.join("/cbcb/lab/nelsayed/ref_data/lmajor_friedlin/genome",
+                              "TriTrypDB-7.0_LmajorFriedlin_Genome.fasta")
+
+        # L. major SL sequence and its reverse complement
+        sl = "AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG"
+        reverse_sl = "CAATAAAGTACAGAAACTGATACTTATATAGCGTTAGTT"
+    else:
+        # Samples to query
+        base_dir = "/cbcb/lab/nelsayed/raw_data/tcruzir21"
+        hpgl_id = "HPGL0250"  # trypomastigote (pathogen only)
+
+        # output directory
+        outdir = os.path.join('output', 'tcruzi_hpgl0250')
+
+        # Genome
+        genome = os.path.join("/cbcb/lab/nelsayed/ref_data/tcruzi_clbrener/genome/tc_esmer",
+                              "TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta")
+
+        # T. cruzi SL sequence and reverse complement
+        sl = "AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG"
+        reverse_sl = "CAATATAGTACAGAAACTGTATCAATAATAGCGTTAGTT"
+
+    # RNA-Seq read filepaths
     reads = glob.glob(os.path.join(base_dir, hpgl_id, 'processed/*.fastq'))
-
-    # Genome location
-    tc = os.path.join("/cbcb/lab/nelsayed/ref_data/tcruzi_clbrener/genome/tc_esmer",
-                      "TriTrypDB-6.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta")
 
     # regular expressions
     min_length = 16
@@ -51,8 +68,8 @@ def main():
     # count occurances of each sequence in reads
     for name,regex in search_patterns.items():
         print("Processing %s" % name)
-        outdir = os.path.join('output', 'lmajor_hpgl0075', name)
-        count_seq_hits(re.compile(regex), reads, tc, outdir)
+        output_dir = os.path.join(outdir, name)
+        count_seq_hits(re.compile(regex), reads, genome, output_dir)
 
 def count_seq_hits(regex, reads, genome, outdir, max_reads=float('inf')):
     """Counts the number of occurances of a specified sequence in a collection
