@@ -492,8 +492,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     matches = []
 
     # output filepaths
-    output_base = '%s/%s/fastq/possible_%s_reads/%s_%s' % (
-        build_dir, sample_id, feature_name, sample_id, read_num 
+    output_base = '%s/%s/fastq/unfiltered/%s_%s' % (
+        build_dir, sample_id, sample_id, read_num 
     )
     output_with_feature = "%s_%s_with_%s.fastq" % (
         output_base, read_num[-1], feature_name
@@ -618,7 +618,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
 def remove_false_hits(feature_name, build_dir, sample_id, read_num):
     """Remove reads that map to genome before trimming"""
-    output_dir = ('%s/%s/tophat/%s_false_hits' % (build_dir, sample_id, read_num))
+    output_dir = ('%s/%s/tophat/%s_unfiltered_untrimmed' % (
+        build_dir, sample_id, read_num))
     genome = os.path.splitext(args.genome)[0]
 
     # input read base directory
@@ -626,13 +627,13 @@ def remove_false_hits(feature_name, build_dir, sample_id, read_num):
 
     # R1 filepath (including matched sequence)
     if (read_num == 'R1'):
-        r1_filepath = ('%s/possible_%s_reads/%s_R1_1_with_%s.fastq.gz' %
-                       (basedir, feature_name, sample_id, feature_name))
+        r1_filepath = ('%s/unfiltered/%s_R1_1_with_%s.fastq.gz' %
+                       (basedir, sample_id, feature_name))
         r2_filepath = r1_filepath.replace('1_with_%s' % feature_name, '2')
     # R2
     else:
-        r2_filepath = ('%s/possible_%s_reads/%s_R2_2_with_%s.fastq.gz' %
-                       (basedir, feature_name, sample_id, feature_name))
+        r2_filepath = ('%s/unfiltered/%s_R2_2_with_%s.fastq.gz' %
+                       (basedir, sample_id, feature_name))
         r1_filepath = r2_filepath.replace('2_with_%s' % feature_name, '1')
 
     # Map reads using Tophat
@@ -667,9 +668,7 @@ def remove_false_hits(feature_name, build_dir, sample_id, read_num):
     )
 
     # Create true hits directory
-    hits_dir = os.path.join(basedir, 'actual_%s_reads' % feature_name)
-    if not os.path.exists(hits_dir):
-        os.makedirs(hits_dir, mode=0o755)
+    hits_dir = os.path.join(basedir, 'filtered') 
 
     # Create filtered versions of R1 (and R2) fastq files with only the un-
     # mapped reads
@@ -680,8 +679,8 @@ def remove_false_hits(feature_name, build_dir, sample_id, read_num):
     # Filepaths
     r1_infile = r1_filepath.replace('with', 'without')
     r2_infile = r2_filepath.replace('with', 'without')
-    r1_outfile = r1_infile.replace('possible', 'actual')
-    r2_outfile = r2_infile.replace('possible', 'actual')
+    r1_outfile = r1_infile.replace('unfiltered', 'filtered')
+    r2_outfile = r2_infile.replace('unfiltered', 'filtered')
 
     filter_fastq(r1_infile, r2_infile, r1_outfile, r2_outfile,
                  good_ids, loggers[sample_id][feature_name][read_num])
@@ -690,8 +689,8 @@ def remove_false_hits(feature_name, build_dir, sample_id, read_num):
 
 def map_reads(feature_name, build_dir, sample_id, read_num):
     """Maps the filtered reads back to the genome"""
-    output_dir = '%s/%s/tophat/%s_%s_reads' % (
-        build_dir, sample_id, read_num, feature_name
+    output_dir = '%s/%s/tophat/%s_filtered_trimmed' % (
+        build_dir, sample_id, read_num
     )
     genome = os.path.splitext(args.genome)[0]
 
@@ -705,8 +704,8 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
     # R1 filepath (including matched sequence)
     if (read_num == 'R1'):
         r1_filepath = (
-            '%s/actual_%s_reads/%s_R1_1_without_%s.fastq.gz' %
-            (basedir, feature_name, sample_id, feature_name)
+            '%s/filtered/%s_R1_1_without_%s.fastq.gz' %
+            (basedir, sample_id, feature_name)
         )
 
         # R2 filepath (for PE reads)
@@ -718,8 +717,8 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
     # R2
     else:
         r2_filepath = (
-            '%s/actual_%s_reads/%s_R2_2_without_%s.fastq.gz' %
-            (basedir, feature_name, sample_id, feature_name)
+            '%s/filtered/%s_R2_2_without_%s.fastq.gz' %
+            (basedir, sample_id, feature_name)
         )
         r1_filepath = r2_filepath.replace('2_with_%s' % feature_name, '1')
 
@@ -740,6 +739,145 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
     loggers[sample_id][feature_name][read_num].info(
         "# Finished mapping hits to genome"
     )
+
+
+def compute_coordinates(feature_name, build_dir, sample_id, read_num):
+    """
+    Outputs coordinates and frequencies of putative UTR features to a GFF file.
+
+    References
+    ----------
+    * http://www.cgat.org/~andreas/documentation/pysam/api.html#pysam.Samfile
+    * http://biopython.org/wiki/GFF_Parsing
+    * http://biopython.org/DIST/docs/api/Bio.SeqFeature.SeqFeature-class.html
+    """
+    # Load existing gene annotations
+    annotations_fp = open(args.gff)
+
+    # Get chromosomes from GFF file
+    chromosomes = {}
+
+    # output directory
+    output_dir = '%s/%s/results' % (build_dir, sample_id)
+
+    for entry in GFF.parse(annotations_fp):
+        if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
+            chromosomes[entry.id] = entry
+
+    # Create a dictionary to keep track of the coordinates.
+    results = {}
+
+    # Create output CSV writer for hits that are not near any genes
+    no_nearby_genes = csv.writer(
+        open('%s/no_nearby_genes_%s.csv' % (output_dir, read_num), 'w')
+    )
+    no_nearby_genes.writerow(['read_id', 'chromosome', 'strand', 'position'])
+
+    # Create output CSV writer for hits that are found inside known CDS's
+    inside_cds = csv.writer(
+        open('%s/inside_cds_%s.csv' % (output_dir, read_num), 'w')
+    )
+    inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
+
+    # Bam input
+    input_bam = '%s/%s/tophat/%s_filtered_trimmed/accepted_hits_sorted.bam' % (
+        build_dir, sample_id, read_num
+    )
+
+    # file to save results for individual sample
+    sample_csv_writer = csv.writer(
+        open('%s/matched_reads_%s.csv' % (output_dir, read_num), 'w')
+    )
+    sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
+                                'strand', 'position', 'distance'])
+
+    # keep track of how many reads were found in the expected location
+    num_good = 0
+    num_no_nearby_genes = 0
+    num_inside_cds = 0
+
+    # open sam file
+    sam = pysam.Samfile(input_bam, 'rb')
+
+    # Keep track of read id so we only count each one once
+    read_ids = []
+
+    # Get coordinate and strand for each read in bam file
+    for read in sam:
+        # if we have already counted the read, stop here
+        if read.qname in read_ids:
+            continue
+        read_ids.append(read.qname)
+
+        # Chromosome and strand where the read was mapped
+        chromosome = sam.getrname(read.tid)
+        strand = "-" if read.is_reverse else "+"
+
+        # First, check to make sure the acceptor site does not fall within
+        # a known CDS: if it does, save to a separate file to look at later
+        if is_inside_cds(chromosomes, read.pos):
+            inside_cds.writerow([read.qname, chromosome, strand, read.pos])
+            num_inside_cds = num_inside_cds + 1
+            continue
+
+        # Find nearest gene
+        gene = find_closest_gene(chromosomes, strand, read.pos)
+
+        # If no nearby genes were found, stop here
+        if gene is None:
+            no_nearby_genes.writerow(
+                [read.qname, chromosome, strand, read.pos])
+            num_no_nearby_genes = num_no_nearby_genes + 1
+            continue
+
+        num_good = num_good + 1
+
+        # Add to output dictionary
+        if not chromosome in results:
+            results[chromosome] = {}
+        if not gene['id'] in results[chromosome]:
+            results[chromosome][gene['id']] = {}
+
+        # Add entry to sample output csv
+        sample_csv_writer.writerow([
+            read.qname, gene['id'], chromosome, strand, read.pos,
+            gene['distance']
+        ])
+
+        # Increment site count and save distance from gene
+        if not read.pos in results[chromosome][gene['id']]:
+            results[chromosome][gene['id']][read.pos] = {
+                "count": 1,
+                "distance": gene['distance'],
+                "strand": strand,
+                "description": gene_description
+            }
+        else:
+            results[chromosome][gene['id']][read.pos]['count'] += 1
+
+    # record number of good and bad reads
+    loggers[sample_id][feature_name][read_num].info(
+        "# Found %d reads with predicted acceptor site at expected location"
+        % num_good)
+    loggers[sample_id][feature_name][read_num].info(
+        "# Found %d reads with predicted acceptor site inside a known CDS"
+        % num_inside_cds)
+    loggers[sample_id][feature_name][read_num].info(
+        "# Found %d reads with predicted acceptor site not proximal to any CDS"
+        % num_no_nearby_genes)
+
+    # Output coordinates as a GFF file
+    output_filepath = '%s/%s_coordinates_%s.gff' % (
+        output_dir, feature_nam, read_num
+    )
+
+    feature_type = 'trans_splice_site' if feature_name is 'sl' else 'polyA_site'
+    output_coordinates(results, feature_type, output_filepath)
+
+    logging.info("# Finished!")
+
+    # clean up
+    annotations_fp.close()
 
 def is_inside_cds(chromosomes, location):
     """
@@ -831,6 +969,8 @@ def output_coordinates(results, feature_type, filepath):
     feature_type: str
         Type of feature, as described in the SOFA ontology.
         [trans_splice_site|polyA_site]
+    filepath: str
+        Filepath to save results to.
     """
     fp = open(filepath, 'w')
 
@@ -923,7 +1063,8 @@ for filepath in glob.glob(input_globstr):
 for sample_id in sample_ids:
     # create build directories
     for base_dir in [sl_build_dir, polya_build_dir, polyt_build_dir]:
-        for sub_dir in ['fastq', 'ruffus', 'tophat']:
+        for sub_dir in ['fastq/filtered', 'fastq/unfiltered', 'ruffus', 
+                        'results', 'log', 'tophat']:
             outdir = os.path.join(base_dir, sample_id, sub_dir)
             if not os.path.exists(outdir):
                 os.makedirs(outdir, mode=0o755)
@@ -969,8 +1110,9 @@ for sample_id in sample_ids_all:
                 bdir = polyt_build_dir
 
             sample_log_name = get_next_log_name(
-                os.path.join(bdir, sample_id, '%s_%s_%s.log' % (sample_id,
-                    analysis, read_num))
+                os.path.join(bdir, sample_id, 'log', '%s_%s_%s.log' % (
+                    sample_id, analysis, read_num
+                ))
             )
             loggers[sample_id][analysis][read_num] = logging.getLogger(
                 sample_id + analysis + read_num
@@ -1173,147 +1315,25 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
 # steps are based to ensure that the putative acceptor sites lie in acceptable
 # locations (e.g. not inside a CDS.)
 #-----------------------------------------------------------------------------
-@collate(map_polyt_reads,
-       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
-       r'\1/\2_.compute_coordinates')
-def compute_coordinates(input_files, output_file):
-    """Maps the filtered spliced-leader containing reads back to the genome.
 
-    References
-    ----------
-    * http://www.cgat.org/~andreas/documentation/pysam/api.html#pysam.Samfile
-    * http://biopython.org/wiki/GFF_Parsing
-    * http://biopython.org/DIST/docs/api/Bio.SeqFeature.SeqFeature-class.html
-    """
-    # load GFF
-    annotations_fp = open(args.gff)
+#@collate(map_polyt_reads,
+#       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
+#       r'\1/\2_.compute_sl_coordinates')
+@transform(map_polyt_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
+           r'\1/\2_\3.compute_sl_coordinates',
+           r'\2', r'\3')
+def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
+    logging.info("# Computing coordinates for mapped trans-splicing events")
+    compute_coordinates('sl', sl_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
 
-    logging.info("# Computing coordinates for mapped hits")
-
-    # Get chromosomes from GFF file
-    chromosomes = {}
-    for entry in GFF.parse(annotations_fp):
-        if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
-            chromosomes[entry.id] = entry
-
-    # Create a dictionary to keep track of the splice acceptor site
-    # locations and frequencies A nested dictionary will be used such that a
-    # given SL site can be indexed using the syntax:
-    # results[chr_num][gene_id][acceptor_site_offset]
-    results = {}
-
-    # Output: no genes nearby
-    no_nearby_genes = csv.writer(open('%s/no_matches.csv' % sl_build_dir, 'w'))
-    no_nearby_genes.writerow(['read_id', 'chromosome', 'strand', 'position'])
-
-    # Output: predicted site inside a CDS
-    inside_cds = csv.writer(open('%s/inside_cds.csv' % sl_build_dir, 'w'))
-    inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
-
-    # Bam inputs
-    input_globstr = ('%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
-                     sl_build_dir)
-
-    # Itereate over mapped reads
-    for filepath in glob.glob(input_globstr):
-        # get sample id
-        sample_id = re.match('.*(HPGL[0-9]+).*', filepath).groups()[0]
-
-        # file to save results for individual sample
-        base_dir = filepath[:re.search('tophat', filepath).start()]
-        sample_hits = os.path.join(base_dir, sample_id + '_sl_coordinates.csv')
-        sample_csv_writer = csv.writer(open(sample_hits, 'w'))
-        sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome', 
-                                    'strand', 'position', 'distance'])
-
-        # keep track of how many reads were found in the expected location
-        num_good = 0
-        num_no_nearby_genes = 0
-        num_inside_cds = 0
-
-        # open sam file
-        sam = pysam.Samfile(filepath, 'rb')
-
-        # Keep track of read id so we only count each one once
-        read_ids = []
-
-        # Get coordinate and strand for each read in bam file
-        for read in sam:
-            # if we have already counted the read, stop here
-            if read.qname in read_ids:
-                continue
-            read_ids.append(read.qname)
-
-            # Chromosome and strand where the read was mapped
-            chromosome = sam.getrname(read.tid)
-            strand = "-" if read.is_reverse else "+"
-
-            # First, check to make sure the acceptor site does not fall within
-            # a known CDS: if it does, save to a separate file to look at later
-            if is_inside_cds(chromosomes, read.pos):
-                inside_cds.writerow([read.qname, chromosome, strand, read.pos])
-                num_inside_cds = num_inside_cds + 1
-                continue
-
-            # Find nearest gene
-            gene = find_closest_gene(chromosomes, strand, read.pos)
-
-            # If no nearby genes were found, stop here
-            if gene is None:
-                no_nearby_genes.writerow(
-                    [read.qname, chromosome, strand, read.pos])
-                num_no_nearby_genes = num_no_nearby_genes + 1
-                continue
-
-            num_good = num_good + 1
-
-            # Add to output dictionary
-            if not chromosome in results:
-                results[chromosome] = {}
-            if not gene['id'] in results[chromosome]:
-                results[chromosome][gene['id']] = {}
-
-            # Add entry to sample output csv
-            sample_csv_writer.writerow([
-                read.qname, gene['id'], chromosome, strand, read.pos,
-                gene['distance']
-            ])
-
-            # Increment SL site count and save distance from gene
-            if not read.pos in results[chromosome][gene['id']]:
-                results[chromosome][gene['id']][read.pos] = {
-                    "count": 1,
-                    "distance": gene['distance'],
-                    "strand": strand,
-                    "description": gene_description
-                }
-            else:
-                results[chromosome][gene['id']][read.pos]['count'] += 1
-
-        # record number of good and bad reads
-        loggers[sample_id]['sl'][read_num].info(
-            "# Found %d reads with predicted acceptor site at expected location"
-            % num_good)
-        loggers[sample_id]['sl'][read_num].info(
-            "# Found %d reads with predicted acceptor site inside a known CDS"
-            % num_inside_cds)
-        loggers[sample_id]['sl'][read_num].info(
-            "# Found %d reads with predicted acceptor site not proximal to any CDS"
-            % num_no_nearby_genes)
-
-    # Output coordinates as a GFF file
-    output_filepath = '%s/sl_coordinates.gff' % (sl_build_dir)
-    output_coordinates(results, 'trans_splice_site', output_filepath)
-
-    logging.info("# Finished!")
-
-    # clean up
-    annotations_fp.close()
-
-# run pipeline
+#-----------------------------------------------------------------------------
+# Run pipeline
+#-----------------------------------------------------------------------------
 if __name__ == "__main__":
-    pipeline_run([compute_coordinates], logger=logging.getLogger(''),
+    pipeline_run([compute_sl_coordinates], logger=logging.getLogger(''),
                  multiprocess=args.num_threads)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
-                            [compute_coordinates])
+                            [compute_sl_coordinates])
 
