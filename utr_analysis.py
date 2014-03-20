@@ -112,8 +112,8 @@ def parse_input():
     parser.add_argument('-p', '--min-polya-length', default=10, type=int,
                         help='Minimum length of Poly-A match (default=10)')
     parser.add_argument('-w', '--window-size', default=10000, type=int,
-                        help=('Number of bases up/downstream of read to look '
-                              'for corresponding genes'))
+                        help=('Number of bases up or downstream of feature to'
+                              'scan for related genes (default=10000)'))
     parser.add_argument('-t', '--num-threads', default=4, type=int,
                         help='Number of threads to use.')
     parser.add_argument('-a', '--author', help='Author contact name', 
@@ -1070,23 +1070,16 @@ def compute_coordinates(input_files, output_file):
     logging.info("# Computing coordinates for mapped hits")
 
     # Get chromosomes from GFF file
-    # @TODO: Generalize for other species
     chromosomes = {}
-    for rec in GFF.parse(gff_fp):
-        #if rec.id.startswith('TcChr'):
-        if len(rec.features) > 0 and rec.features[0].type == 'chromosome':
-            chromosomes[rec.id] = rec
+    for entry in GFF.parse(gff_fp):
+        if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
+            chromosomes[entry.id] = entry
 
     # Create a dictionary to keep track of the splice acceptor site
-    # locations and frequencies
-    # A nested dictionary will be used such that a given SL site can be
-    # indexed using the syntax:
+    # locations and frequencies A nested dictionary will be used such that a
+    # given SL site can be indexed using the syntax:
     # results[chr_num][gene_id][acceptor_site_offset]
     results = {}
-
-    # Bam inputs
-    input_globstr = ('%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
-                     sl_build_dir)
 
     # Output: no genes nearby
     no_nearby_genes = csv.writer(open('%s/no_matches.csv' % sl_build_dir, 'w'))
@@ -1096,9 +1089,13 @@ def compute_coordinates(input_files, output_file):
     inside_cds = csv.writer(open('%s/inside_cds.csv' % sl_build_dir, 'w'))
     inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
 
+    # Bam inputs
+    input_globstr = ('%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' %
+                     sl_build_dir)
+
     # Itereate over mapped reads
     for filepath in glob.glob(input_globstr):
-        # get hpgl id
+        # get sample id
         sample_id = re.match('.*(HPGL[0-9]+).*', filepath).groups()[0]
 
         # file to save results for individual sample
@@ -1130,13 +1127,21 @@ def compute_coordinates(input_files, output_file):
             chromosome = sam.getrname(read.tid)
             strand = "-" if read.is_reverse else "+"
 
-            # first, check to make sure the acceptor site does not fall within
+            # Number of bases before or after feature
+            half_window = args.window_size / 2
+
+            # Extract region of sequence surrounding the putative feature of
+            # interest
+            nearby = chromosomes[chromosome][pos - half_window:pos + half_window]
+
+            # First, check to make sure the acceptor site does not fall within
             # a known CDS -- if it does, save to a separate file to look
             # at later
-            nearby = chromosomes[chromosome][pos - 5000:pos + 5000]
             for feature in nearby.features:
-                if ((feature.location.start <= 5000) and 
-                    (feature.location.end >= 5000)):
+                # (half_window is the center point in new sub-region)
+                if ((feature.location.start <= half_window) and 
+                    (feature.location.end >= half_window)):
+
                     # predicted acceptor site is inside a CDS
                     inside_cds.writerow([read.qname, chromosome, strand, pos])
                     num_inside_cds = num_inside_cds + 1
@@ -1168,13 +1173,19 @@ def compute_coordinates(input_files, output_file):
 
             # Otherwise find closest gene to the acceptor site
             closest_gene = None
+            closest_index = None
             closest_dist = float('inf')
 
-            for f in subseq.features:
-                dist = abs(offset - int(getattr(f.location, gene_start)))
+            for i, gene in enumerate(subseq.features):
+                dist = abs(offset - int(getattr(gene.location, gene_start)))
                 if dist < closest_dist:
-                    closest_gene = f.id
+                    closest_index = i
+                    closest_gene = gene.id
                     closest_dist = dist
+
+            # Get description of closest matching gene
+            gene_description = (subseq.features[closest_index]
+                                      .qualifiers['description'].pop())
 
             # Add to output dictionary
             if not chromosome in results:
@@ -1192,7 +1203,8 @@ def compute_coordinates(input_files, output_file):
                 results[chromosome][closest_gene][pos] = {
                     "count": 1,
                     "dist": closest_dist,
-                    "strand": strand
+                    "strand": strand,
+                    "description": gene_description
                 }
             else:
                 results[chromosome][closest_gene][pos]['count'] += 1
@@ -1209,14 +1221,18 @@ def compute_coordinates(input_files, output_file):
             % num_no_nearby_genes)
 
     # Output filepath
-    coordinates_output = '%s/sl_coordinates.bed' % (sl_build_dir)
+    # GFF trans_splice_site, polyA_site
+    coordinates_output = '%s/sl_coordinates.gff' % (sl_build_dir)
     fp = open(coordinates_output, 'w')
 
     # Write csv header
-    header = create_header_comment(os.path.basename(coordinates_output),
-                                   "Spliced leader acceptor site coordinates",
-                                   args.author, args.email)
-    fp.write(header)
+    #header = create_header_comment(os.path.basename(coordinates_output),
+    #                               "Spliced leader acceptor site coordinates",
+    #                               args.author, args.email)
+    #fp.write(header)
+    fp.write("##gff-version\t3")
+    fp.write("##feature-ontology\tsofa.obo")
+    fp.write("##attribute-ontology\tgff3_attributes.obo")
 
     # Write header to output
     writer = csv.writer(fp, delimiter='\t')
@@ -1225,11 +1241,19 @@ def compute_coordinates(input_files, output_file):
     for chrnum in results:
         for gene_id in results[chrnum]:
             for acceptor_site in results[chrnum][gene_id]:
+                # gff3 attributes
+                attributes = "ID=%s;Name=%s;description=%s" % (
+                    gene_id, gene_id,
+                    results[chrnum][gene_id][acceptor_site]['description']
+                )
+
+                # write entry
                 writer.writerow([
-                    chrnum, acceptor_site, acceptor_site,
+                    chrnum, "utr_analysis.py", "trans_splice_site",
+                    acceptor_site, acceptor_site,
                     results[chrnum][gene_id][acceptor_site]['count'],
                     results[chrnum][gene_id][acceptor_site]['strand'],
-                    gene_id
+                    '.', attributes
                 ])
 
     logging.info("# Finished!")
