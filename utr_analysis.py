@@ -741,6 +741,127 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
         "# Finished mapping hits to genome"
     )
 
+def is_inside_cds(chromosomes, location):
+    """
+    Checks to see if a putative acceptor site is inside an annotated CDS.
+
+    Parameters
+    ----------
+    chromosomes: dict
+        Dictionary of chromosome SeqRecords parsed from GFF.
+    location: int
+        Location of putative feature of interest within the chromosome.
+
+    Return
+    ------
+    bool
+        True if the feature is located in a known CDS.
+    """
+    # Number of bases before or after feature
+    half_window = args.window_size / 2
+
+    # Extract region of sequence surrounding the putative feature of
+    # interest
+    nearby = chromosomes[chromosome][location - half_window:location + half_window]
+
+    # scan all genes near putative feature
+    for feature in nearby.features:
+        # (half_window is the center point in new sub-region)
+        if ((feature.location.start <= half_window) and 
+            (feature.location.end >= half_window)):
+            return True
+
+    return False
+
+def find_closest_gene(chromosomes, strand, location):
+    """
+    Finds the closest gene to a specified location that is in the expected
+    orientation.
+    """
+    # 1. Get genes within +/- N bases of location (if any)
+    # 2. Find closest match
+    if strand == "+":
+        # For positive-strand sites, search region just downstream 
+        # of splice-site for genes
+        subseq = chromosomes[chromosome][location:location + args.window_size]
+        gene_start = 'start'
+        offset = 0
+    else:
+        # For negative-strand sites, search region just upstream
+        # of splice-site for genes
+        subseq = chromosomes[chromosome][location - args.window_size:location]
+        gene_start = 'end'
+        offset = args.window_size
+
+    # If there are no nearby genes, stop here
+    if len(subseq.features) == 0:
+        return None
+
+    # Otherwise find closest gene to the acceptor site
+    closest_gene = None
+    closest_index = None
+    closest_dist = float('inf')
+
+    for i, gene in enumerate(subseq.features):
+        dist = abs(offset - int(getattr(gene.location, gene_start)))
+        if dist < closest_dist:
+            closest_index = i
+            closest_gene = gene.id
+            closest_dist = dist
+
+    # Get description of closest matching gene
+    gene_description = (subseq.features[closest_index]
+                                .qualifiers['description'].pop())
+
+    # Return details for matching gene
+    return {
+        'id': closest_gene,
+        'description': gene_description,
+        'distance': closest_dist
+    }
+
+def output_coordinates(results, feature_type, filepath):
+    """
+    Outputs the feature coordinates as a GFF3 file.
+
+    Parameters
+    ----------
+    results: dict
+        A nested dictionary containing the putative UTR features.
+    feature_type: str
+        Type of feature, as described in the SOFA ontology.
+        [trans_splice_site|polyA_site]
+    """
+    fp = open(filepath, 'w')
+
+    # Write csv header
+    fp.write("##gff-version\t3")
+    fp.write("##feature-ontology\tsofa.obo")
+    fp.write("##attribute-ontology\tgff3_attributes.obo")
+
+    # Write header to output
+    writer = csv.writer(fp, delimiter='\t')
+
+    # write output to csv
+    for chrnum in results:
+        for gene_id in results[chrnum]:
+            for acceptor_site in results[chrnum][gene_id]:
+                # gff3 attributes
+                attributes = "ID=%s;Name=%s;description=%s" % (
+                    gene_id, gene_id,
+                    results[chrnum][gene_id][acceptor_site]['description']
+                )
+
+                # write entry
+                writer.writerow([
+                    chrnum, "utr_analysis.py", feature_type,
+                    acceptor_site, acceptor_site,
+                    results[chrnum][gene_id][acceptor_site]['count'],
+                    results[chrnum][gene_id][acceptor_site]['strand'],
+                    '.', attributes
+                ])
+    fp.close()
+
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -1065,13 +1186,13 @@ def compute_coordinates(input_files, output_file):
     * http://biopython.org/DIST/docs/api/Bio.SeqFeature.SeqFeature-class.html
     """
     # load GFF
-    gff_fp = open(args.gff)
+    annotations_fp = open(args.gff)
 
     logging.info("# Computing coordinates for mapped hits")
 
     # Get chromosomes from GFF file
     chromosomes = {}
-    for entry in GFF.parse(gff_fp):
+    for entry in GFF.parse(annotations_fp):
         if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
             chromosomes[entry.id] = entry
 
@@ -1123,91 +1244,51 @@ def compute_coordinates(input_files, output_file):
                 continue
             read_ids.append(read.qname)
 
-            pos = read.pos
+            # Chromosome and strand where the read was mapped
             chromosome = sam.getrname(read.tid)
             strand = "-" if read.is_reverse else "+"
 
-            # Number of bases before or after feature
-            half_window = args.window_size / 2
-
-            # Extract region of sequence surrounding the putative feature of
-            # interest
-            nearby = chromosomes[chromosome][pos - half_window:pos + half_window]
-
             # First, check to make sure the acceptor site does not fall within
-            # a known CDS -- if it does, save to a separate file to look
-            # at later
-            for feature in nearby.features:
-                # (half_window is the center point in new sub-region)
-                if ((feature.location.start <= half_window) and 
-                    (feature.location.end >= half_window)):
-
-                    # predicted acceptor site is inside a CDS
-                    inside_cds.writerow([read.qname, chromosome, strand, pos])
-                    num_inside_cds = num_inside_cds + 1
-                    continue
+            # a known CDS: if it does, save to a separate file to look at later
+            if is_inside_cds(chromosomes, read.pos):
+                inside_cds.writerow([read.qname, chromosome, strand, read.pos])
+                num_inside_cds = num_inside_cds + 1
+                continue
 
             # Find nearest gene
-            # 1. Get genes within +/- N bases of location (if any)
-            # 2. Find closest match
-            if strand == "+":
-                # For positive-strand sites, search region just downstream 
-                # of splice-site for genes
-                subseq = chromosomes[chromosome][pos:pos + args.window_size]
-                gene_start = 'start'
-                offset = 0
-            else:
-                # For negative-strand sites, search region just upstream
-                # of splice-site for genes
-                subseq = chromosomes[chromosome][pos - args.window_size:pos]
-                gene_start = 'end'
-                offset = args.window_size
+            gene = find_closest_gene(chromosomes, strand, read.pos)
 
-            # If there are no nearby genes, stop here
-            if len(subseq.features) == 0:
-                no_nearby_genes.writerow([read.qname, chromosome, strand, pos])
+            # If no nearby genes were found, stop here
+            if gene is None:
+                no_nearby_genes.writerow(
+                    [read.qname, chromosome, strand, read.pos])
                 num_no_nearby_genes = num_no_nearby_genes + 1
                 continue
 
             num_good = num_good + 1
 
-            # Otherwise find closest gene to the acceptor site
-            closest_gene = None
-            closest_index = None
-            closest_dist = float('inf')
-
-            for i, gene in enumerate(subseq.features):
-                dist = abs(offset - int(getattr(gene.location, gene_start)))
-                if dist < closest_dist:
-                    closest_index = i
-                    closest_gene = gene.id
-                    closest_dist = dist
-
-            # Get description of closest matching gene
-            gene_description = (subseq.features[closest_index]
-                                      .qualifiers['description'].pop())
-
             # Add to output dictionary
             if not chromosome in results:
                 results[chromosome] = {}
-            if not closest_gene in results[chromosome]:
-                results[chromosome][closest_gene] = {}
+            if not gene['id'] in results[chromosome]:
+                results[chromosome][gene['id']] = {}
 
             # Add entry to sample output csv
             sample_csv_writer.writerow([
-                read.qname, closest_gene, chromosome, strand, pos, closest_dist
+                read.qname, gene['id'], chromosome, strand, read.pos,
+                gene['distance']
             ])
 
             # Increment SL site count and save distance from gene
-            if not pos in results[chromosome][closest_gene]:
-                results[chromosome][closest_gene][pos] = {
+            if not read.pos in results[chromosome][gene['id']]:
+                results[chromosome][gene['id']][read.pos] = {
                     "count": 1,
-                    "dist": closest_dist,
+                    "distance": gene['distance'],
                     "strand": strand,
                     "description": gene_description
                 }
             else:
-                results[chromosome][closest_gene][pos]['count'] += 1
+                results[chromosome][gene['id']][read.pos]['count'] += 1
 
         # record number of good and bad reads
         loggers[sample_id]['sl'][read_num].info(
@@ -1220,47 +1301,14 @@ def compute_coordinates(input_files, output_file):
             "# Found %d reads with predicted acceptor site not proximal to any CDS"
             % num_no_nearby_genes)
 
-    # Output filepath
-    # GFF trans_splice_site, polyA_site
-    coordinates_output = '%s/sl_coordinates.gff' % (sl_build_dir)
-    fp = open(coordinates_output, 'w')
-
-    # Write csv header
-    #header = create_header_comment(os.path.basename(coordinates_output),
-    #                               "Spliced leader acceptor site coordinates",
-    #                               args.author, args.email)
-    #fp.write(header)
-    fp.write("##gff-version\t3")
-    fp.write("##feature-ontology\tsofa.obo")
-    fp.write("##attribute-ontology\tgff3_attributes.obo")
-
-    # Write header to output
-    writer = csv.writer(fp, delimiter='\t')
-
-    # write output to csv
-    for chrnum in results:
-        for gene_id in results[chrnum]:
-            for acceptor_site in results[chrnum][gene_id]:
-                # gff3 attributes
-                attributes = "ID=%s;Name=%s;description=%s" % (
-                    gene_id, gene_id,
-                    results[chrnum][gene_id][acceptor_site]['description']
-                )
-
-                # write entry
-                writer.writerow([
-                    chrnum, "utr_analysis.py", "trans_splice_site",
-                    acceptor_site, acceptor_site,
-                    results[chrnum][gene_id][acceptor_site]['count'],
-                    results[chrnum][gene_id][acceptor_site]['strand'],
-                    '.', attributes
-                ])
+    # Output coordinates as a GFF file
+    output_filepath = '%s/sl_coordinates.gff' % (sl_build_dir)
+    output_coordinates(results, 'trans_splice_site', output_filepath)
 
     logging.info("# Finished!")
 
     # clean up
-    gff_fp.close()
-    fp.close()
+    annotations_fp.close()
 
 # run pipeline
 if __name__ == "__main__":
