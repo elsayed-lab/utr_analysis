@@ -17,7 +17,7 @@ from Bio import SeqIO,Seq
 
 def main():
     # Select species and sample to query
-    target = 'tcruzi' # 'lmajor'
+    target = 'lmajor' # 'tcruzi'
 
     if target == 'lmajor':
         # Samples to query

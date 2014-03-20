@@ -1092,7 +1092,7 @@ def compute_coordinates(input_files, output_file):
 
             pos = read.pos
             chromosome = sam.getrname(read.tid)
-            strand = -1 if read.is_reverse else 1
+            strand = "-" if read.is_reverse else "+"
 
             # first, check to make sure the acceptor site does not fall within
             # a known CDS -- if it does, save to a separate file to look
@@ -1109,7 +1109,7 @@ def compute_coordinates(input_files, output_file):
             # Find nearest gene
             # 1. Get genes within +/- N bases of location (if any)
             # 2. Find closest match
-            if strand == 1:
+            if strand == "+":
                 # For positive-strand sites, search region just downstream 
                 # of splice-site for genes
                 subseq = chromosomes[chromosome][pos:pos + args.window_size]
@@ -1155,7 +1155,8 @@ def compute_coordinates(input_files, output_file):
             if not pos in results[chromosome][closest_gene]:
                 results[chromosome][closest_gene][pos] = {
                     "count": 1,
-                    "dist": closest_dist
+                    "dist": closest_dist,
+                    "strand": strand
                 }
             else:
                 results[chromosome][closest_gene][pos]['count'] += 1
@@ -1172,7 +1173,7 @@ def compute_coordinates(input_files, output_file):
             % num_no_nearby_genes)
 
     # Output filepath
-    coordinates_output = '%s/sl_coordinates.csv' % (sl_build_dir)
+    coordinates_output = '%s/sl_coordinates.bed' % (sl_build_dir)
     fp = open(coordinates_output, 'w')
 
     # Write csv header
@@ -1182,18 +1183,17 @@ def compute_coordinates(input_files, output_file):
     fp.write(header)
 
     # Write header to output
-    writer = csv.writer(fp)
-    writer.writerow(['gene', 'chromosome', 'location', 'distance', 
-                     'count'])
+    writer = csv.writer(fp, delimiter='\t')
 
     # write output to csv
     for chrnum in results:
         for gene_id in results[chrnum]:
             for acceptor_site in results[chrnum][gene_id]:
                 writer.writerow([
-                    gene_id, chrnum, acceptor_site,
-                    results[chrnum][gene_id][acceptor_site]['dist'],
-                    results[chrnum][gene_id][acceptor_site]['count']
+                    chrnum, acceptor_site, acceptor_site,
+                    results[chrnum][gene_id][acceptor_site]['count'],
+                    results[chrnum][gene_id][acceptor_site]['strand'],
+                    gene_id
                 ])
 
     logging.info("# Finished!")
