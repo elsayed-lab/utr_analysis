@@ -439,11 +439,35 @@ def get_next_log_name(base_name):
         next_log_num = max([0] + log_nums) + 1
         return "%s.%d" % (base_name, next_log_num)
 
-def find_sequence(input_file, feature_name, feature_regex, build_dir, hpgl_id,
-                  read_num):
+def find_sequence(input_file, feature_name, sequence_filter, feature_regex, 
+                  build_dir, sample_id, read_num):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing a specified sequence of interest.
+
+    Parameters
+    ----------
+    input_file: str
+        Filepath to a FASTQ file containing reads to scan.
+    feature_name: str
+        Type of feature being searched for; used in naming filing and
+        directories and in choosing logs to write to. [sl|polya|polyt]
+    sequence_filter: str
+        A short sequence string used for initial filtering. All reads will be
+        checked to see if it contains this string, and those that do will be
+        further checked using a regular expression to find the location of the
+        match.
+    feature_regex: str
+        A regular expression string indicating the exact sequence to be
+        searched for. This will be either a set of spliced leader prefixes or
+        suffixes, or a string of A's or T's, possibly anchored at one end of
+        the read.
+    build_dir: str
+        Base directory to save output to.
+    sample_id: str
+        ID of the sample being scanned.
+    read_num: str
+        Which of the mated reads should be scanned. [R1|R2]
 
     Output files
     ------------
@@ -462,14 +486,14 @@ def find_sequence(input_file, feature_name, feature_regex, build_dir, hpgl_id,
         *_R2_1.fastq
     """
     # sample logger
-    log = loggers[hpgl_id][feature_name][read_num]
+    log = loggers[sample_id][feature_name][read_num]
 
     # list to keep track of potential matches
     matches = []
 
     # output filepaths
     output_base = '%s/%s/fastq/possible_%s_reads/%s_%s' % (
-        build_dir, hpgl_id, feature_name, hpgl_id, read_num 
+        build_dir, sample_id, feature_name, sample_id, read_num 
     )
     output_with_feature = "%s_%s_with_%s.fastq" % (
         output_base, read_num[-1], feature_name
@@ -512,6 +536,11 @@ def find_sequence(input_file, feature_name, feature_regex, build_dir, hpgl_id,
     for i, read in enumerate(readfq(fastq)):
         # get mated read
         mated_read = mated_reads.next()
+
+        # ignore any reads that don't contain at least the smallest part of
+        # the sequence of interest
+        if sequence_filter not in read[SEQUENCE_IDX]:
+            continue
 
         # check for match
         match = re.search(read_regex, read[SEQUENCE_IDX])
@@ -587,41 +616,41 @@ def find_sequence(input_file, feature_name, feature_regex, build_dir, hpgl_id,
 
     log.info("# Finished processing %s" % os.path.basename(input_file))
 
-def remove_false_hits(feature_name, build_dir, hpgl_id, read_num):
+def remove_false_hits(feature_name, build_dir, sample_id, read_num):
     """Remove reads that map to genome before trimming"""
-    output_dir = ('%s/%s/tophat/%s_false_hits' % (build_dir, hpgl_id, read_num))
+    output_dir = ('%s/%s/tophat/%s_false_hits' % (build_dir, sample_id, read_num))
     genome = os.path.splitext(args.genome)[0]
 
     # input read base directory
-    basedir = '%s/%s/fastq' % (build_dir, hpgl_id)
+    basedir = '%s/%s/fastq' % (build_dir, sample_id)
 
     # R1 filepath (including matched sequence)
     if (read_num == 'R1'):
         r1_filepath = ('%s/possible_%s_reads/%s_R1_1_with_%s.fastq.gz' %
-                       (basedir, feature_name, hpgl_id, feature_name))
+                       (basedir, feature_name, sample_id, feature_name))
         r2_filepath = r1_filepath.replace('1_with_%s' % feature_name, '2')
     # R2
     else:
         r2_filepath = ('%s/possible_%s_reads/%s_R2_2_with_%s.fastq.gz' %
-                       (basedir, feature_name, hpgl_id, feature_name))
+                       (basedir, feature_name, sample_id, feature_name))
         r1_filepath = r2_filepath.replace('2_with_%s' % feature_name, '1')
 
     # Map reads using Tophat
     # @TODO parameterize extra_args (except for --no-mixed in this case) to
     # allow for easier customization
-    loggers[hpgl_id][feature_name][read_num].info(
+    loggers[sample_id][feature_name][read_num].info(
         "# Mapping full reads containing sequence match to find false\n"
         "# hits (reads that correspond to actual features in the genome)"
     )
     ret = run_tophat(output_dir, genome, 
-                     loggers[hpgl_id][feature_name][read_num],
+                     loggers[sample_id][feature_name][read_num],
                      r1_filepath, r2_filepath,
                      extra_args='--mate-inner-dist 170 --no-mixed')
 
     # Make sure tophat succeeded
     if ret != 0:
         logging.error(
-            "# Error running tophat 1/2! %s (%s)" % (hpgl_id, read_num)
+            "# Error running tophat 1/2! %s (%s)" % (sample_id, read_num)
         )
         sys.exit()
 
@@ -632,7 +661,7 @@ def remove_false_hits(feature_name, build_dir, hpgl_id, read_num):
 
     # number of reads before filtering
     num_reads_before = num_lines(r1_filepath) / 4
-    loggers[hpgl_id][feature_name][read_num].info(
+    loggers[sample_id][feature_name][read_num].info(
         "# Removing %d false hits (%d total)" %
         (num_reads_before - len(good_ids), num_reads_before)
     )
@@ -644,7 +673,7 @@ def remove_false_hits(feature_name, build_dir, hpgl_id, read_num):
 
     # Create filtered versions of R1 (and R2) fastq files with only the un-
     # mapped reads
-    loggers[hpgl_id][feature_name][read_num].info(
+    loggers[sample_id][feature_name][read_num].info(
         "# Filtering matched reads to remove false hits"
     )
 
@@ -655,29 +684,29 @@ def remove_false_hits(feature_name, build_dir, hpgl_id, read_num):
     r2_outfile = r2_infile.replace('possible', 'actual')
 
     filter_fastq(r1_infile, r2_infile, r1_outfile, r2_outfile,
-                 good_ids, loggers[hpgl_id][feature_name][read_num])
+                 good_ids, loggers[sample_id][feature_name][read_num])
 
-    loggers[hpgl_id][feature_name][read_num].info("# Finished removing false hits.")
+    loggers[sample_id][feature_name][read_num].info("# Finished removing false hits.")
 
-def map_reads(feature_name, build_dir, hpgl_id, read_num):
+def map_reads(feature_name, build_dir, sample_id, read_num):
     """Maps the filtered reads back to the genome"""
     output_dir = '%s/%s/tophat/%s_%s_reads' % (
-        build_dir, hpgl_id, read_num, feature_name
+        build_dir, sample_id, read_num, feature_name
     )
     genome = os.path.splitext(args.genome)[0]
 
-    loggers[hpgl_id][feature_name][read_num].info(
+    loggers[sample_id][feature_name][read_num].info(
         "# Mapping filtered reads back to genome"
     )
 
     # input read base directory
-    basedir = '%s/%s/fastq' % (build_dir, hpgl_id)
+    basedir = '%s/%s/fastq' % (build_dir, sample_id)
 
     # R1 filepath (including matched sequence)
     if (read_num == 'R1'):
         r1_filepath = (
             '%s/actual_%s_reads/%s_R1_1_without_%s.fastq.gz' %
-            (basedir, feature_name, hpgl_id, feature_name)
+            (basedir, feature_name, sample_id, feature_name)
         )
 
         # R2 filepath (for PE reads)
@@ -690,25 +719,25 @@ def map_reads(feature_name, build_dir, hpgl_id, read_num):
     else:
         r2_filepath = (
             '%s/actual_%s_reads/%s_R2_2_without_%s.fastq.gz' %
-            (basedir, feature_name, hpgl_id, feature_name)
+            (basedir, feature_name, sample_id, feature_name)
         )
         r1_filepath = r2_filepath.replace('2_with_%s' % feature_name, '1')
 
     # Map reads using Tophat
     #  --no-mixed ?
     ret = run_tophat(output_dir, genome,
-                 loggers[hpgl_id][feature_name][read_num],
+                 loggers[sample_id][feature_name][read_num],
                  r1_filepath, r2_filepath,
                  extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
 
     # Make sure tophat succeeded
     if ret != 0:
         logging.error(
-            "# Error running tophat 2/2! %s (%s)" % (hpgl_id, read_num)
+            "# Error running tophat 2/2! %s (%s)" % (sample_id, read_num)
         )
         sys.exit()
 
-    loggers[hpgl_id][feature_name][read_num].info(
+    loggers[sample_id][feature_name][read_num].info(
         "# Finished mapping hits to genome"
     )
 
@@ -749,31 +778,32 @@ polyt_build_dir = os.path.join(
     'anchored' if args.exclude_internal_matches else 'unanchored'
 )
 
-# get a list of HPGL ids
+# Get a list of sample ids ids
+# @TODO: Generalize handling of sample ids
 input_regex = re.compile(r'.*(HPGL[0-9]+).*')
-hpgl_ids = []
+sample_ids = []
 
 # currently processing
 for filename in glob.glob(args.input_reads):
-    hpgl_id = re.match(input_regex, filename).groups()[0]
-    if hpgl_id not in hpgl_ids:
-        hpgl_ids.append(hpgl_id)
+    sample_id = re.match(input_regex, filename).groups()[0]
+    if sample_id not in sample_ids:
+        sample_ids.append(sample_id)
 
 # list of ids including previously processed samples (used for final step)
-hpgl_ids_all = hpgl_ids
+sample_ids_all = sample_ids
 input_globstr = (
     '%s/*/tophat/*_sl_reads/accepted_hits_sorted.bam' % sl_build_dir
 )
 for filepath in glob.glob(input_globstr):
     # get hpgl id
-    hpgl_ids_all.append(re.match('.*(HPGL[0-9]+).*', filepath).groups()[0])
+    sample_ids_all.append(re.match('.*(HPGL[0-9]+).*', filepath).groups()[0])
 
 # create subdirs based on matching parameters
-for hpgl_id in hpgl_ids:
+for sample_id in sample_ids:
     # create build directories
     for base_dir in [sl_build_dir, polya_build_dir, polyt_build_dir]:
         for sub_dir in ['fastq', 'ruffus', 'tophat']:
-            outdir = os.path.join(base_dir, hpgl_id, sub_dir)
+            outdir = os.path.join(base_dir, sample_id, sub_dir)
             if not os.path.exists(outdir):
                 os.makedirs(outdir, mode=0o755)
 
@@ -803,11 +833,11 @@ logging.info("# Command:\n%s" % " ".join(sys.argv))
 loggers = {}
 
 # setup sample-specific loggers
-for hpgl_id in hpgl_ids_all:
-    loggers[hpgl_id] = {}
+for sample_id in sample_ids_all:
+    loggers[sample_id] = {}
 
     for analysis in ['sl', 'polya', 'polyt']:
-        loggers[hpgl_id][analysis] = {}
+        loggers[sample_id][analysis] = {}
 
         for read_num in ['R1', 'R2']:
             if analysis == 'sl':
@@ -818,15 +848,15 @@ for hpgl_id in hpgl_ids_all:
                 bdir = polyt_build_dir
 
             sample_log_name = get_next_log_name(
-                os.path.join(bdir, hpgl_id, '%s_%s_%s.log' % (hpgl_id,
+                os.path.join(bdir, sample_id, '%s_%s_%s.log' % (sample_id,
                     analysis, read_num))
             )
-            loggers[hpgl_id][analysis][read_num] = logging.getLogger(
-                hpgl_id + analysis + read_num
+            loggers[sample_id][analysis][read_num] = logging.getLogger(
+                sample_id + analysis + read_num
             )
             handler = logging.FileHandler(sample_log_name)
             handler.setFormatter(formatter)
-            loggers[hpgl_id][analysis][read_num].addHandler(handler)
+            loggers[sample_id][analysis][read_num].addHandler(handler)
 
 #-----------------------------------------------------------------------------
 # Ruffus tasks
@@ -891,11 +921,14 @@ def check_for_genome_fasta():
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_sl_reads' % sl_build_dir,
            r'\2', r'\4')
-def find_sl_reads(input_file, output_file, hpgl_id, read_num):
+def find_sl_reads(input_file, output_file, sample_id, read_num):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing a subsequence of the spliced leader.
     """
+    # First-stage filter string
+    sl_filter = args.spliced_leader[-args.min_sl_length:]
+
     # Determine strings to match in reads
     if args.exclude_internal_matches:
         sl_regex = '|'.join(
@@ -903,9 +936,10 @@ def find_sl_reads(input_file, output_file, hpgl_id, read_num):
              range(args.min_sl_length, len(args.spliced_leader) + 1)]
         )
     else:
-        sl_regex = args.spliced_leader[-args.min_sl_length:]
+        sl_regex = sl_filter
 
-    find_sequence(input_file, 'sl', sl_regex, sl_build_dir, hpgl_id, read_num)
+    find_sequence(input_file, 'sl', sl_filter, sl_regex, sl_build_dir, 
+                  sample_id, read_num)
 
     # Let Ruffus know we are done
     open(output_file, 'w').close()
@@ -915,14 +949,15 @@ def find_sl_reads(input_file, output_file, hpgl_id, read_num):
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
            r'\2', r'\4')
-def find_polya_reads(input_file, output_file, hpgl_id, read_num):
+def find_polya_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
     # Match reads with at least n A's at the end of the read; For now we will 
     # always require matches to be at the end of the read.
+    polya_filter = 'A' * args.min_polya_length
     polya_regex = 'A{%d,}$' % (args.min_polya_length)
 
-    find_sequence(input_file, 'polya', polya_regex, polya_build_dir,
-                  hpgl_id, read_num)
+    find_sequence(input_file, 'polya', polya_filter, polya_regex, 
+                  polya_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 @follows(find_polya_reads)
@@ -930,13 +965,14 @@ def find_polya_reads(input_file, output_file, hpgl_id, read_num):
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
            r'\2', r'\4')
-def find_polyt_reads(input_file, output_file, hpgl_id, read_num):
+def find_polyt_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(T) tail fragment"""
     # Match reads with at least n T's at the beginning of the read; For now 
     # we will always require matches to be at the beginning of the read.
+    polyt_filter = 'T' * args.min_polya_length
     polyt_regex = 'T{%d,}$' % (args.min_polya_length)
-    find_sequence(input_file, 'polyt', polyt_regex, polyt_build_dir,
-                  hpgl_id, read_num)
+    find_sequence(input_file, 'polyt', polyt_filter, polyt_regex, 
+                  polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
@@ -951,26 +987,26 @@ def find_polyt_reads(input_file, output_file, hpgl_id, read_num):
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polyt_reads'),
            r'\1/\2_\3.remove_sl_false_hits',
            r'\2', r'\3')
-def remove_sl_false_hits(input_file, output_file, hpgl_id, read_num):
-    remove_false_hits('sl', sl_build_dir, hpgl_id, read_num)
+def remove_sl_false_hits(input_file, output_file, sample_id, read_num):
+    remove_false_hits('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 @transform(remove_sl_false_hits,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_sl_false_hits'),
            r'\1/\2_\3.remove_polya_false_hits',
            r'\2', r'\3')
-def remove_polya_false_hits(input_file, output_file, hpgl_id, read_num):
+def remove_polya_false_hits(input_file, output_file, sample_id, read_num):
     """Remove Poly(A) reads that map to genome before trimming"""
-    remove_false_hits('polya', polya_build_dir, hpgl_id, read_num)
+    remove_false_hits('polya', polya_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 @transform(remove_polya_false_hits,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
            r'\1/\2_\3.remove_polyt_false_hits',
            r'\2', r'\3')
-def remove_polyt_false_hits(input_file, output_file, hpgl_id, read_num):
+def remove_polyt_false_hits(input_file, output_file, sample_id, read_num):
     """Remove Poly(T) reads that map to genome before trimming"""
-    remove_false_hits('polyt', polyt_build_dir, hpgl_id, read_num)
+    remove_false_hits('polyt', polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
@@ -984,27 +1020,27 @@ def remove_polyt_false_hits(input_file, output_file, hpgl_id, read_num):
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polyt_false_hits'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
-def map_sl_reads(input_file, output_file, hpgl_id, read_num):
+def map_sl_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
-    map_reads('sl', sl_build_dir, hpgl_id, read_num)
+    map_reads('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 @transform(map_sl_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
            r'\1/\2_\3.map_polya_reads',
            r'\2', r'\3')
-def map_polya_reads(input_file, output_file, hpgl_id, read_num):
+def map_polya_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
-    map_reads('polya', polya_build_dir, hpgl_id, read_num)
+    map_reads('polya', polya_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 @transform(map_polya_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polya_reads'),
            r'\1/\2_\3.map_polyt_reads',
            r'\2', r'\3')
-def map_polyt_reads(input_file, output_file, hpgl_id, read_num):
+def map_polyt_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered Poly(T) reads back to the genome"""
-    map_reads('polyt', polyt_build_dir, hpgl_id, read_num)
+    map_reads('polyt', polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
@@ -1063,11 +1099,11 @@ def compute_coordinates(input_files, output_file):
     # Itereate over mapped reads
     for filepath in glob.glob(input_globstr):
         # get hpgl id
-        hpgl_id = re.match('.*(HPGL[0-9]+).*', filepath).groups()[0]
+        sample_id = re.match('.*(HPGL[0-9]+).*', filepath).groups()[0]
 
         # file to save results for individual sample
         base_dir = filepath[:re.search('tophat', filepath).start()]
-        sample_hits = os.path.join(base_dir, hpgl_id + '_sl_coordinates.csv')
+        sample_hits = os.path.join(base_dir, sample_id + '_sl_coordinates.csv')
         sample_csv_writer = csv.writer(open(sample_hits, 'w'))
         sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome', 
                                     'strand', 'position', 'distance'])
@@ -1162,13 +1198,13 @@ def compute_coordinates(input_files, output_file):
                 results[chromosome][closest_gene][pos]['count'] += 1
 
         # record number of good and bad reads
-        loggers[hpgl_id]['sl'][read_num].info(
+        loggers[sample_id]['sl'][read_num].info(
             "# Found %d reads with predicted acceptor site at expected location"
             % num_good)
-        loggers[hpgl_id]['sl'][read_num].info(
+        loggers[sample_id]['sl'][read_num].info(
             "# Found %d reads with predicted acceptor site inside a known CDS"
             % num_inside_cds)
-        loggers[hpgl_id]['sl'][read_num].info(
+        loggers[sample_id]['sl'][read_num].info(
             "# Found %d reads with predicted acceptor site not proximal to any CDS"
             % num_no_nearby_genes)
 
