@@ -440,7 +440,7 @@ def get_next_log_name(base_name):
         return "%s.%d" % (base_name, next_log_num)
 
 def find_sequence(input_file, feature_name, sequence_filter, feature_regex, 
-                  build_dir, sample_id, read_num):
+                  build_dir, sample_id, read_num, reverse=False):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing a specified sequence of interest.
@@ -468,6 +468,9 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         ID of the sample being scanned.
     read_num: str
         Which of the mated reads should be scanned. [R1|R2]
+    reverse: bool
+        If set to True, the reverse complement of each of the trimmed reads
+        will be saved.
 
     Output files
     ------------
@@ -569,6 +572,12 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         # skip reads that are less than 36 bases after trimming
         if len(trimmed_read[SEQUENCE_IDX]) < 36:
             continue
+
+        # take reverse complement if requested
+        if reverse:
+            trimmed_read[SEQUENCE_IDX] = str(
+                Seq.Seq(trimmed_read[SEQUENCE_IDX]).reverse_complement())
+            trimmed_read[QUALITY_IDX] = trimmed_read[QUALITY_IDX][::-1]
 
         # Otherwise add trimmed read to output
         reads_without_feature.write("\n".join(trimmed_read) + "\n")
@@ -815,13 +824,13 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         # First, check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
-        if is_inside_cds(chromosomes, read.pos):
+        if is_inside_cds(chromosomes[chromosome], read.pos):
             inside_cds.writerow([read.qname, chromosome, strand, read.pos])
             num_inside_cds = num_inside_cds + 1
             continue
 
         # Find nearest gene
-        gene = find_closest_gene(chromosomes, strand, read.pos)
+        gene = find_closest_gene(chromosomes[chromosome], strand, read.pos)
 
         # If no nearby genes were found, stop here
         if gene is None:
@@ -850,7 +859,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 "count": 1,
                 "distance": gene['distance'],
                 "strand": strand,
-                "description": gene_description
+                "description": gene['description']
             }
         else:
             results[chromosome][gene['id']][read.pos]['count'] += 1
@@ -868,7 +877,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
     # Output coordinates as a GFF file
     output_filepath = '%s/%s_coordinates_%s.gff' % (
-        output_dir, feature_nam, read_num
+        output_dir, feature_name, read_num
     )
 
     feature_type = 'trans_splice_site' if feature_name is 'sl' else 'polyA_site'
@@ -879,7 +888,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     # clean up
     annotations_fp.close()
 
-def is_inside_cds(chromosomes, location):
+def is_inside_cds(chromosome, location):
     """
     Checks to see if a putative acceptor site is inside an annotated CDS.
 
@@ -900,7 +909,7 @@ def is_inside_cds(chromosomes, location):
 
     # Extract region of sequence surrounding the putative feature of
     # interest
-    nearby = chromosomes[chromosome][location - half_window:location + half_window]
+    nearby = chromosome[location - half_window:location + half_window]
 
     # scan all genes near putative feature
     for feature in nearby.features:
@@ -911,7 +920,7 @@ def is_inside_cds(chromosomes, location):
 
     return False
 
-def find_closest_gene(chromosomes, strand, location):
+def find_closest_gene(chromosome, strand, location):
     """
     Finds the closest gene to a specified location that is in the expected
     orientation.
@@ -921,13 +930,13 @@ def find_closest_gene(chromosomes, strand, location):
     if strand == "+":
         # For positive-strand sites, search region just downstream 
         # of splice-site for genes
-        subseq = chromosomes[chromosome][location:location + args.window_size]
+        subseq = chromosome[location:location + args.window_size]
         gene_start = 'start'
         offset = 0
     else:
         # For negative-strand sites, search region just upstream
         # of splice-site for genes
-        subseq = chromosomes[chromosome][location - args.window_size:location]
+        subseq = chromosome[location - args.window_size:location]
         gene_start = 'end'
         offset = args.window_size
 
@@ -948,8 +957,13 @@ def find_closest_gene(chromosomes, strand, location):
             closest_dist = dist
 
     # Get description of closest matching gene
-    gene_description = (subseq.features[closest_index]
-                                .qualifiers['description'].pop())
+    desc_qualifiers = subseq.features[closest_index].qualifiers['description']
+    if len(desc_qualifiers) > 0:
+        gene_description = desc_qualifiers[0]
+    else:
+        # TESTING
+        print("Missing description for gene: %s" % closest_gene)
+        gene_description = ""
 
     # Return details for matching gene
     return {
@@ -1235,7 +1249,7 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
     polyt_filter = 'T' * args.min_polya_length
     polyt_regex = 'T{%d,}$' % (args.min_polya_length)
     find_sequence(input_file, 'polyt', polyt_filter, polyt_regex, 
-                  polyt_build_dir, sample_id, read_num)
+                  polyt_build_dir, sample_id, read_num, reverse=True)
     open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
@@ -1326,6 +1340,25 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped trans-splicing events")
     compute_coordinates('sl', sl_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+@transform(compute_sl_coordinates,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).compute_sl_coordinates'),
+           r'\1/\2_\3.compute_polya_coordinates',
+           r'\2', r'\3')
+def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
+    logging.info(
+        "# Computing coordinates for mapped polyadenylation events [1/2]")
+    compute_coordinates('polya', polya_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+@transform(compute_polya_coordinates,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).compute_polya_coordinates'),
+           r'\1/\2_\3.compute_polyt_coordinates',
+           r'\2', r'\3')
+def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
+    logging.info(
+        "# Computing coordinates for mapped polyadenylation events [2/2]")
+    compute_coordinates('polyt', polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
