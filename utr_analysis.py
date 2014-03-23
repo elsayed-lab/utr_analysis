@@ -55,6 +55,7 @@ import StringIO
 import textwrap
 import subprocess
 from ruffus import *
+from Bio import Seq
 from BCBio import GFF
 
 #--------------------------------------
@@ -440,7 +441,8 @@ def get_next_log_name(base_name):
         return "%s.%d" % (base_name, next_log_num)
 
 def find_sequence(input_file, feature_name, sequence_filter, feature_regex, 
-                  build_dir, sample_id, read_num, reverse=False):
+                  build_dir, sample_id, read_num, trim_direction='left',
+                  reverse=False):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing a specified sequence of interest.
@@ -468,6 +470,9 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         ID of the sample being scanned.
     read_num: str
         Which of the mated reads should be scanned. [R1|R2]
+    trim_direction: str
+        When trimming the matched sequence, also remove all bases in this
+        direction of the match (default: left)
     reverse: bool
         If set to True, the reverse complement of each of the trimmed reads
         will be saved.
@@ -554,16 +559,15 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
         # otherwise add to output fastq
 
-        # If matched sequence is at the beginning of the read, trim everything
+        # If feature is expected to be found at left of read, trim everything 
         # up to the end of the match
-        if match.start() <= (len(read[SEQUENCE_IDX]) - match.end()):
+        if trim_direction == 'left':
             trimmed_read = [read[ID_IDX],
                             read[SEQUENCE_IDX][match.end():],
                             "+",
                             read[QUALITY_IDX][match.end():]]
         else:
-            # If matched sequence is at the end of the read, trim everything 
-            # from the start of the match on
+            # otherwise trim from the start of the match to the end of the read
             trimmed_read = [read[ID_IDX],
                             read[SEQUENCE_IDX][:match.start()],
                             "+",
@@ -1213,7 +1217,10 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
              range(args.min_sl_length, len(args.spliced_leader) + 1)]
         )
     else:
-        sl_regex = sl_filter
+        sl_regex = '|'.join(
+            [args.spliced_leader[-x:] for x in 
+             range(args.min_sl_length, len(args.spliced_leader) + 1)]
+        )
 
     find_sequence(input_file, 'sl', sl_filter, sl_regex, sl_build_dir, 
                   sample_id, read_num)
@@ -1228,13 +1235,15 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
            r'\2', r'\4')
 def find_polya_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
-    # Match reads with at least n A's at the end of the read; For now we will 
-    # always require matches to be at the end of the read.
     polya_filter = 'A' * args.min_polya_length
-    polya_regex = 'A{%d,}$' % (args.min_polya_length)
+
+    if args.exclude_internal_matches:
+        polya_regex = 'A{%d,}$' % (args.min_polya_length)
+    else:
+        polya_regex = 'A{%d,}' % (args.min_polya_length)
 
     find_sequence(input_file, 'polya', polya_filter, polya_regex, 
-                  polya_build_dir, sample_id, read_num)
+                  polya_build_dir, sample_id, read_num, trim_direction='right')
     open(output_file, 'w').close()
 
 @follows(find_polya_reads)
@@ -1247,7 +1256,11 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
     # Match reads with at least n T's at the beginning of the read; For now 
     # we will always require matches to be at the beginning of the read.
     polyt_filter = 'T' * args.min_polya_length
-    polyt_regex = 'T{%d,}$' % (args.min_polya_length)
+    if args.exclude_internal_matches:
+        polyt_regex = 'T{%d,}$' % (args.min_polya_length)
+    else:
+        polyt_regex = 'T{%d,}' % (args.min_polya_length)
+
     find_sequence(input_file, 'polyt', polyt_filter, polyt_regex, 
                   polyt_build_dir, sample_id, read_num, reverse=True)
     open(output_file, 'w').close()
@@ -1365,8 +1378,8 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
 # Run pipeline
 #-----------------------------------------------------------------------------
 if __name__ == "__main__":
-    pipeline_run([compute_sl_coordinates], logger=logging.getLogger(''),
+    pipeline_run([compute_polyt_coordinates], logger=logging.getLogger(''),
                  multiprocess=args.num_threads)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
-                            [compute_sl_coordinates])
+                            [compute_polyt_coordinates])
 
