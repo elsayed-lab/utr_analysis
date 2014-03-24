@@ -884,8 +884,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         output_dir, feature_name, read_num
     )
 
-    feature_type = 'trans_splice_site' if feature_name is 'sl' else 'polyA_site'
-    output_coordinates(results, feature_type, output_filepath)
+    output_coordinates(results, feature_name, output_filepath)
 
     logging.info("# Finished!")
 
@@ -976,7 +975,7 @@ def find_closest_gene(chromosome, strand, location):
         'distance': closest_dist
     }
 
-def output_coordinates(results, feature_type, filepath):
+def output_coordinates(results, feature_name, filepath):
     """
     Outputs the feature coordinates as a GFF3 file.
 
@@ -993,20 +992,23 @@ def output_coordinates(results, feature_type, filepath):
     fp = open(filepath, 'w')
 
     # Write csv header
-    fp.write("##gff-version\t3")
-    fp.write("##feature-ontology\tsofa.obo")
-    fp.write("##attribute-ontology\tgff3_attributes.obo")
+    fp.write("##gff-version\t3\n")
+    fp.write("##feature-ontology\tsofa.obo\n")
+    fp.write("##attribute-ontology\tgff3_attributes.obo\n")
 
     # Write header to output
     writer = csv.writer(fp, delimiter='\t')
 
+    # Determine GFF feature type to use
+    feature_type = 'trans_splice_site' if feature_name is 'sl' else 'polyA_site'
+
     # write output to csv
     for chrnum in results:
         for gene_id in results[chrnum]:
-            for acceptor_site in results[chrnum][gene_id]:
+            for i, acceptor_site in enumerate(results[chrnum][gene_id], 1):
                 # gff3 attributes
-                attributes = "ID=%s;Name=%s;description=%s" % (
-                    gene_id, gene_id,
+                attributes = "ID=%s;Name=%s;description=%s.%s.%d" % (
+                    gene_id, gene_id, feature_name, i
                     results[chrnum][gene_id][acceptor_site]['description']
                 )
 
