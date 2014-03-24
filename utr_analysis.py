@@ -964,7 +964,7 @@ def find_closest_gene(chromosome, strand, location):
     if len(desc_qualifiers) > 0:
         gene_description = desc_qualifiers[0]
     else:
-        # TESTING
+        # TESTING 2014/03/21 (can remove if no longer occurs)
         print("Missing description for gene: %s" % closest_gene)
         gene_description = ""
 
@@ -1230,7 +1230,7 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
-@follows(find_sl_reads)
+@follows(compute_sl_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
@@ -1248,7 +1248,7 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
                   polya_build_dir, sample_id, read_num, trim_direction='right')
     open(output_file, 'w').close()
 
-@follows(find_polya_reads)
+@follows(compute_polya_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
@@ -1275,16 +1275,16 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
 # in the actual genome, and not a trans-splicing or polyadenylation event, and
 # are filtered out.
 #-----------------------------------------------------------------------------
-@transform(find_polyt_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polyt_reads'),
+@transform(find_sl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
            r'\1/\2_\3.remove_sl_false_hits',
            r'\2', r'\3')
 def remove_sl_false_hits(input_file, output_file, sample_id, read_num):
     remove_false_hits('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
-@transform(remove_sl_false_hits,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_sl_false_hits'),
+@transform(find_polya_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polya_reads'),
            r'\1/\2_\3.remove_polya_false_hits',
            r'\2', r'\3')
 def remove_polya_false_hits(input_file, output_file, sample_id, read_num):
@@ -1292,8 +1292,8 @@ def remove_polya_false_hits(input_file, output_file, sample_id, read_num):
     remove_false_hits('polya', polya_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
-@transform(remove_polya_false_hits,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
+@transform(find_polyt_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polyt_reads'),
            r'\1/\2_\3.remove_polyt_false_hits',
            r'\2', r'\3')
 def remove_polyt_false_hits(input_file, output_file, sample_id, read_num):
@@ -1308,8 +1308,8 @@ def remove_polyt_false_hits(input_file, output_file, sample_id, read_num):
 # the matched sequence comes from a trans-splicing or polyadenylation event,
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
-@transform(remove_polyt_false_hits,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polyt_false_hits'),
+@transform(remove_sl_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_sl_false_hits'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, sample_id, read_num):
@@ -1317,8 +1317,8 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
     map_reads('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
-@transform(map_sl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
+@transform(remove_polya_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
            r'\1/\2_\3.map_polya_reads',
            r'\2', r'\3')
 def map_polya_reads(input_file, output_file, sample_id, read_num):
@@ -1326,8 +1326,8 @@ def map_polya_reads(input_file, output_file, sample_id, read_num):
     map_reads('polya', polya_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
-@transform(map_polya_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polya_reads'),
+@transform(remove_polyt_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polyt_false_hits'),
            r'\1/\2_\3.map_polyt_reads',
            r'\2', r'\3')
 def map_polyt_reads(input_file, output_file, sample_id, read_num):
@@ -1348,8 +1348,8 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
 #@collate(map_polyt_reads,
 #       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
 #       r'\1/\2_.compute_sl_coordinates')
-@transform(map_polyt_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
+@transform(map_sl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
            r'\1/\2_\3.compute_sl_coordinates',
            r'\2', r'\3')
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
@@ -1357,8 +1357,8 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     compute_coordinates('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
-@transform(compute_sl_coordinates,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).compute_sl_coordinates'),
+@transform(map_polya_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polya_reads'),
            r'\1/\2_\3.compute_polya_coordinates',
            r'\2', r'\3')
 def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
@@ -1366,8 +1366,9 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
         "# Computing coordinates for mapped polyadenylation events [1/2]")
     compute_coordinates('polya', polya_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
-@transform(compute_polya_coordinates,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).compute_polya_coordinates'),
+
+@transform(map_polyt_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
            r'\1/\2_\3.compute_polyt_coordinates',
            r'\2', r'\3')
 def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
