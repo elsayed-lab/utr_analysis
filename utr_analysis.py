@@ -1007,8 +1007,8 @@ def output_coordinates(results, feature_name, filepath):
         for gene_id in results[chrnum]:
             for i, acceptor_site in enumerate(results[chrnum][gene_id], 1):
                 # gff3 attributes
-                attributes = "ID=%s;Name=%s;description=%s.%s.%d" % (
-                    gene_id, gene_id, feature_name, i
+                attributes = "ID=%s.%s.%d;Name=%s;description=%s" % (
+                    gene_id, feature_name, i, gene_id,
                     results[chrnum][gene_id][acceptor_site]['description']
                 )
 
@@ -1230,7 +1230,67 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
     # Let Ruffus know we are done
     open(output_file, 'w').close()
 
+#-----------------------------------------------------------------------------
+# Step 2: Remove false hits
+#
+# In this step, the matching reads from step 1 are mapped as-is: any reads
+# which successfully map in this way can then be attributed to sequences found
+# in the actual genome, and not a trans-splicing or polyadenylation event, and
+# are filtered out.
+#-----------------------------------------------------------------------------
+@transform(find_sl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
+           r'\1/\2_\3.remove_sl_false_hits',
+           r'\2', r'\3')
+def remove_sl_false_hits(input_file, output_file, sample_id, read_num):
+    remove_false_hits('sl', sl_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
 @follows(compute_sl_coordinates)
+
+#-----------------------------------------------------------------------------
+# Step 3: Map trimmed reads
+#
+# Trims the matched sequences from reads and map to genome. For reads where
+# the matched sequence comes from a trans-splicing or polyadenylation event,
+# the location of the mapped trimmed read is where the addition took place.
+#-----------------------------------------------------------------------------
+@transform(remove_sl_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_sl_false_hits'),
+           r'\1/\2_\3.map_sl_reads',
+           r'\2', r'\3')
+def map_sl_reads(input_file, output_file, sample_id, read_num):
+    """Maps the filtered spliced-leader containing reads back to the genome"""
+    map_reads('sl', sl_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
+# Step 4: Compute UTR coordinates
+#
+# In this step, the locations of mapped trimmed reads above are used to
+# determine likely trans-splicing and polyadenylation acceptor sites in the
+# genome for the processed input samples. A couple of additional filtering
+# steps are based to ensure that the putative acceptor sites lie in acceptable
+# locations (e.g. not inside a CDS.)
+#-----------------------------------------------------------------------------
+#@collate(map_polyt_reads,
+#       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
+#       r'\1/\2_.compute_sl_coordinates')
+@transform(map_sl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
+           r'\1/\2_\3.compute_sl_coordinates',
+           r'\2', r'\3')
+def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
+    logging.info("# Computing coordinates for mapped trans-splicing events")
+    compute_coordinates('sl', sl_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
+# Poly(A) Analysis
+#-----------------------------------------------------------------------------
+
+#
+# Poly(A) Step 1
+#
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
@@ -1248,6 +1308,50 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
                   polya_build_dir, sample_id, read_num, trim_direction='right')
     open(output_file, 'w').close()
 
+#
+# Poly(A) Step 2
+#
+@transform(find_polya_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polya_reads'),
+           r'\1/\2_\3.remove_polya_false_hits',
+           r'\2', r'\3')
+def remove_polya_false_hits(input_file, output_file, sample_id, read_num):
+    """Remove Poly(A) reads that map to genome before trimming"""
+    remove_false_hits('polya', polya_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#
+# Poly(A) Step 3
+#
+@transform(remove_polya_false_hits,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
+           r'\1/\2_\3.map_polya_reads',
+           r'\2', r'\3')
+def map_polya_reads(input_file, output_file, sample_id, read_num):
+    """Maps the filtered poly-adenylated reads back to the genome"""
+    map_reads('polya', polya_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#
+# Poly(A) Step 4
+#
+@transform(map_polya_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polya_reads'),
+           r'\1/\2_\3.compute_polya_coordinates',
+           r'\2', r'\3')
+def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
+    logging.info(
+        "# Computing coordinates for mapped polyadenylation events [1/2]")
+    compute_coordinates('polya', polya_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
+# Poly(T) Analysis
+#-----------------------------------------------------------------------------
+
+#
+# Poly(T) Step 1
+#
 @follows(compute_polya_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
@@ -1267,31 +1371,9 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
                   polyt_build_dir, sample_id, read_num, reverse=True)
     open(output_file, 'w').close()
 
-#-----------------------------------------------------------------------------
-# Step 2: Remove false hits
 #
-# In this step, the matching reads from step 1 are mapped as-is: any reads
-# which successfully map in this way can then be attributed to sequences found
-# in the actual genome, and not a trans-splicing or polyadenylation event, and
-# are filtered out.
-#-----------------------------------------------------------------------------
-@transform(find_sl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
-           r'\1/\2_\3.remove_sl_false_hits',
-           r'\2', r'\3')
-def remove_sl_false_hits(input_file, output_file, sample_id, read_num):
-    remove_false_hits('sl', sl_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
-
-@transform(find_polya_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polya_reads'),
-           r'\1/\2_\3.remove_polya_false_hits',
-           r'\2', r'\3')
-def remove_polya_false_hits(input_file, output_file, sample_id, read_num):
-    """Remove Poly(A) reads that map to genome before trimming"""
-    remove_false_hits('polya', polya_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
-
+# Poly(T) Step 2
+#
 @transform(find_polyt_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polyt_reads'),
            r'\1/\2_\3.remove_polyt_false_hits',
@@ -1301,31 +1383,9 @@ def remove_polyt_false_hits(input_file, output_file, sample_id, read_num):
     remove_false_hits('polyt', polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
-#-----------------------------------------------------------------------------
-# Step 3: Map trimmed reads
 #
-# Trims the matched sequences from reads and map to genome. For reads where
-# the matched sequence comes from a trans-splicing or polyadenylation event,
-# the location of the mapped trimmed read is where the addition took place.
-#-----------------------------------------------------------------------------
-@transform(remove_sl_false_hits,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_sl_false_hits'),
-           r'\1/\2_\3.map_sl_reads',
-           r'\2', r'\3')
-def map_sl_reads(input_file, output_file, sample_id, read_num):
-    """Maps the filtered spliced-leader containing reads back to the genome"""
-    map_reads('sl', sl_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
-
-@transform(remove_polya_false_hits,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polya_false_hits'),
-           r'\1/\2_\3.map_polya_reads',
-           r'\2', r'\3')
-def map_polya_reads(input_file, output_file, sample_id, read_num):
-    """Maps the filtered poly-adenylated reads back to the genome"""
-    map_reads('polya', polya_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
-
+# Poly(T) Step 3
+#
 @transform(remove_polyt_false_hits,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).remove_polyt_false_hits'),
            r'\1/\2_\3.map_polyt_reads',
@@ -1335,38 +1395,9 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
     map_reads('polyt', polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
-#-----------------------------------------------------------------------------
-# Step 4: Compute UTR coordinates
 #
-# In this step, the locations of mapped trimmed reads above are used to
-# determine likely trans-splicing and polyadenylation acceptor sites in the
-# genome for the processed input samples. A couple of additional filtering
-# steps are based to ensure that the putative acceptor sites lie in acceptable
-# locations (e.g. not inside a CDS.)
-#-----------------------------------------------------------------------------
-
-#@collate(map_polyt_reads,
-#       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
-#       r'\1/\2_.compute_sl_coordinates')
-@transform(map_sl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
-           r'\1/\2_\3.compute_sl_coordinates',
-           r'\2', r'\3')
-def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info("# Computing coordinates for mapped trans-splicing events")
-    compute_coordinates('sl', sl_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
-
-@transform(map_polya_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polya_reads'),
-           r'\1/\2_\3.compute_polya_coordinates',
-           r'\2', r'\3')
-def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info(
-        "# Computing coordinates for mapped polyadenylation events [1/2]")
-    compute_coordinates('polya', polya_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
-
+# Poly(T) Step 4
+#
 @transform(map_polyt_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
            r'\1/\2_\3.compute_polyt_coordinates',
