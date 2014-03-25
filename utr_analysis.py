@@ -1245,7 +1245,6 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
 def remove_sl_false_hits(input_file, output_file, sample_id, read_num):
     remove_false_hits('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
-@follows(compute_sl_coordinates)
 
 #-----------------------------------------------------------------------------
 # Step 3: Map trimmed reads
@@ -1291,6 +1290,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 #
 # Poly(A) Step 1
 #
+@follows(compute_sl_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
