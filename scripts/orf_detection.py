@@ -89,11 +89,17 @@ def main():
 
             # Write GFF entries for each match
             for j, orf in enumerate(orfs, 1):
-                # write entry
+                # Convert coordinates to chromosomal position
+                #if orf[2] == "+":
+                start = orf[0] + region.start
+                stop = orf[1] + region.start
+                strand = orf[2]
+
+                # Write entry
                 gff_attrs = "ID=%s.ORF.%d;Name=%s.ORF.%d" % (chrnum, j,
                                                              chrnum, j)
-                writer.writerow([chrnum, "ElSayedLab", 'ORF', 
-                                orf[0], orf[1], '.', orf[2], '.', gff_attrs])
+                writer.writerow([chrnum, "ElSayedLab", 'ORF',
+                                start, stop, '.', strand, '.', gff_attrs])
 
     # clean up
     fp.close()
@@ -133,7 +139,7 @@ def find_orfs(seq, min_protein_length, trans_table=1):
     seq_len = len(seq)
 
     # Check each of the six possible reading frames
-    for strand, dna_seq in [(+1, seq), (-1, seq.reverse_complement())]:
+    for strand, dna_seq in [("+", seq), ("-", seq.reverse_complement())]:
         for frame in range(3):
             trans = str(dna_seq[frame:].translate(trans_table))
             trans_len = len(trans)
@@ -143,29 +149,31 @@ def find_orfs(seq, min_protein_length, trans_table=1):
             # Iterate through ORFS in reading frame
             while aa_start < trans_len:
                 # Set end counter to position of next stop codon
+                aa_start = trans.find("M", aa_start)
                 aa_end = trans.find("*", aa_start)
 
-                # If no stop codons are found, scan entire sequence
+                # If no start or stop codons found, stop here
+                if aa_start == -1 or aa_end == -1:
+                    break
+
+                # extend stop codon until ORF is of sufficient length
+                while (aa_end - aa_start < min_protein_length) and aa_end > -1:
+                    aa_end = trans.find("*", aa_end + 1)
+
+                # If no ORFs of sufficent size found, stop here
                 if aa_end == -1:
-                    aa_end = trans_len
+                    break
 
-                # Find first stop codon in current region
-                start_codon = trans[aa_start:aa_end].find("M")
+                # Compute coordinates of ORF
+                if strand == "+":
+                    start = frame + aa_start * 3
+                    end = min(seq_len, frame + aa_end * 3 + 3)
+                else:
+                    start = seq_len - frame - aa_end * 3 - 3
+                    end = seq_len - frame - aa_start * 3
 
-                aa_start_met = aa_start + start_codon
-
-                # check to make sure start codon exists and number of amino
-                # acids from start codon to stop codon is of sufficient length
-                if (start_codon != -1 and
-                    aa_end - aa_start_met >= min_protein_length):
-
-                    if strand == 1:
-                        start = frame + aa_start_met * 3
-                        end = min(seq_len, frame + aa_end * 3 + 3)
-                    else:
-                        start = min(0, seq_len - frame - aa_end * 3 - 3)
-                        end = seq_len - frame - aa_start_met * 3
-                    answer.append((start, end, strand))
+                # Add to output
+                answer.append((start, end, strand))
 
                 # increment start counter and continue
                 aa_start = aa_end + 1
