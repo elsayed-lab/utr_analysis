@@ -75,11 +75,10 @@ def main():
     # Write header to output
     writer = csv.writer(fp, delimiter='\t')
 
-    # GFF attribute template
-    attr_template = "ID=%s.ORF.%d;Name=%s.ORF.%d;description=\"ORF %d (%s)\"" 
-
     # Iterate through interCDS regions
-    for chrnum in inter_cds_regions:
+    for i, chrnum in enumerate(inter_cds_regions, 1):
+        print("Processing %s (%d/%d)" % (chrnum, i, len(chromosomes)))
+
         for region in inter_cds_regions[chrnum]:
             # get sequence record for the range
             record = chromosomes[chrnum][region.start:region.stop]
@@ -89,9 +88,10 @@ def main():
             orfs = find_orfs(record.seq, min_length)
 
             # Write GFF entries for each match
-            for i, orf in enumerate(orfs, 1):
+            for j, orf in enumerate(orfs, 1):
                 # write entry
-                gff_attrs = attr_template % (chrnum, i, chrnum, i, i, chrnum)
+                gff_attrs = "ID=%s.ORF.%d;Name=%s.ORF.%d" % (chrnum, j,
+                                                             chrnum, j)
                 writer.writerow([chrnum, "ElSayedLab", 'ORF', 
                                 orf[0], orf[1], '.', orf[2], '.', gff_attrs])
 
@@ -127,28 +127,47 @@ def find_orfs(seq, min_protein_length, trans_table=1):
     """
     Finds ORFs of a specified minimum length in a SeqRecord.
 
-    Source: http://biopython.org/DIST/docs/tutorial/Tutorial.html#sec360
+    Based on: http://biopython.org/DIST/docs/tutorial/Tutorial.html#sec360
     """
     answer = []
     seq_len = len(seq)
-    for strand, nuc in [(+1, seq), (-1, seq.reverse_complement())]:
+
+    # Check each of the six possible reading frames
+    for strand, dna_seq in [(+1, seq), (-1, seq.reverse_complement())]:
         for frame in range(3):
-            trans = str(nuc[frame:].translate(trans_table))
+            trans = str(dna_seq[frame:].translate(trans_table))
             trans_len = len(trans)
             aa_start = 0
             aa_end = 0
+
+            # Iterate through ORFS in reading frame
             while aa_start < trans_len:
+                # Set end counter to position of next stop codon
                 aa_end = trans.find("*", aa_start)
+
+                # If no stop codons are found, scan entire sequence
                 if aa_end == -1:
                     aa_end = trans_len
-                if aa_end-aa_start >= min_protein_length:
+
+                # Find first stop codon in current region
+                start_codon = trans[aa_start:aa_end].find("M")
+
+                aa_start_met = aa_start + start_codon
+
+                # check to make sure start codon exists and number of amino
+                # acids from start codon to stop codon is of sufficient length
+                if (start_codon != -1 and
+                    aa_end - aa_start_met >= min_protein_length):
+
                     if strand == 1:
-                        start = frame + aa_start * 3
-                        end = min(seq_len,frame+aa_end * 3 + 3)
+                        start = frame + aa_start_met * 3
+                        end = min(seq_len, frame + aa_end * 3 + 3)
                     else:
-                        start = seq_len-frame-aa_end * 3 - 3
-                        end = seq_len-frame-aa_start * 3
+                        start = min(0, seq_len - frame - aa_end * 3 - 3)
+                        end = seq_len - frame - aa_start_met * 3
                     answer.append((start, end, strand))
+
+                # increment start counter and continue
                 aa_start = aa_end + 1
     answer.sort()
     return answer
