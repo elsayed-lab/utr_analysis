@@ -57,11 +57,11 @@ def main():
         # boundaries (@TODO: check if this is also true for T. brucei)
         for gene in genes:
             end = int(gene.location.start)
-            inter_cds_regions[chrnum].append(range(start, end))
+            inter_cds_regions[chrnum].append((start, end))
             start = int(gene.location.end)
 
         # add region after last gene
-        inter_cds_regions[chrnum].append(range(start, ch_end))
+        inter_cds_regions[chrnum].append((start, ch_end))
 
     # Iterate over inter-CDS regions and find ORFs of at least the specified 
     # length in any of the six possible reading frames and output as GFF entries
@@ -79,25 +79,25 @@ def main():
     for i, chrnum in enumerate(inter_cds_regions, 1):
         print("Processing %s (%d/%d)" % (chrnum, i, len(chromosomes)))
 
-        for region in inter_cds_regions[chrnum]:
+        for j, region in enumerate(inter_cds_regions[chrnum]):
             # get sequence record for the range
-            record = chromosomes[chrnum][region.start:region.stop]
+            record = chromosomes[chrnum][region[0]:region[1]]
 
             # Find ORFs in each of the six possible reading frames that are at
             # least the specified length
             orfs = find_orfs(record.seq, min_length)
 
             # Write GFF entries for each match
-            for j, orf in enumerate(orfs, 1):
+            for k, orf in enumerate(orfs, 1):
                 # Convert coordinates to chromosomal position
                 #if orf[2] == "+":
-                start = orf[0] + region.start
-                stop = orf[1] + region.start
+                start = orf[0] + region[0] + 1
+                stop = orf[1] + region[0]
                 strand = orf[2]
 
                 # Write entry
-                gff_attrs = "ID=%s.ORF.%d;Name=%s.ORF.%d" % (chrnum, j,
-                                                             chrnum, j)
+                orf_id = "%s.ORF.%d.%d" % (chrnum, j, k)
+                gff_attrs = "ID=%s;Name=%s" % (orf_id, orf_id)
                 writer.writerow([chrnum, "ElSayedLab", 'ORF',
                                 start, stop, '.', strand, '.', gff_attrs])
 
