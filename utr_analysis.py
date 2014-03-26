@@ -1238,8 +1238,51 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
     if read_num != "R1":
         return
 
+    # output directories
+    tophat_dir = os.path.join(shared_build_dir, sample_id,
+                          'tophat', 'mapped_to_nontarget')
+    fastq_dir = os.path.join(shared_build_dir, sample_id,
+                          'fastq', 'nontarget_reads_removed')
+
+    # read locations
+    r1 = input_file
+    r2 = input_file.replace("R1", "R2")
+
+    # map nontarget reads
+    ret = run_tophat(tophat_dir, args.nontarget_genome, console, r1, r2)
+
+    # Make sure tophat succeeded
+    if ret != 0:
+        logging.error("# Error running tophat (nontarget)! %s" % (sample_id))
+        sys.exit()
+
+    # Keep only the reads which did not map to the nontarget genome; any that
+    # did map here come from a species we are not interested in
+    sam = pysam.Samfile(os.path.join(tophat_dir, 'unmapped.bam'), 'rb')
+    good_ids = [x.qname for x in sam]
+
+    # number of reads before filtering
+    num_reads_before = num_lines(r1) / 4
+    console.info(
+        "# Ignoring %d reads which mapped to an unrelated genome (%d total)" %
+        (num_reads_before - len(good_ids), num_reads_before)
+    )
+
+    # output fastq filepaths
+    r1_outfile = os.path.join(fastq_dir, "%s_%s_nontarget_removed.fastq.gz" %
+                              (sample_id, read_num))
+    r2_outfile = r1_outfile.replace("R1", "R2")
+
+    # Create filtered versions of R1 (and R2) fastq files with only the un-
+    # Filepaths
+    filter_fastq(r1, r2, r2_outfile, r2_outfile, good_ids, console)
+
+    # Let ruffus know we are finished
+    open(output_file, 'w').close()
+    console.info("# Finished removing nontarget reads.")
+
 #-----------------------------------------------------------------------------
-# Step 1: Find reads with sequence of interest
+# Step X: Find reads with sequence of interest
 #
 # Finds reads containing a minimum number of bases of the feature of interest;
 # either a portion of the spliced leader (SL) sequence, or a Poly(A) or Poly(T)
