@@ -14,11 +14,6 @@ A reference genome and CDS coordinates are required as input and will be used
 to map reads back after removing the spliced leader in order to determine the
 SL acceptor site.
 
-NOTE
-----
-Initially, development of this script will focus on SL site determination. Once
-this has been properly implemented, support for poly-A analysis will be added.
-
 TODO
 ----
 - For reads where feature was found in R2, discard R1 and just map R2
@@ -31,14 +26,6 @@ TODO
     - average number of accepter sites per CDS
 - Compare above statistics across samples
 
-Testing
--------
-
-utr_analysis.py \
-    -i "$RAW/tcruzir21/HPGL0258/processed/*.filtered.fastq" \
-    -f $REF/tcruzi_clbrener/genome/tc_esmer/TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
-    -g $REF/tcruzi_clbrener/annotation/tc_esmer/TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like.gff      \
-    -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG
 """
 import os
 import re
@@ -79,7 +66,7 @@ def parse_input():
     ./utr_analysis.py                                              \\
         -i "$RAW/tcruzir21/*/processed/*.filtered.fastq"           \\
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
-        -f TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
+        -f1 TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
         -g TrypDB-7.0_TcruziCLBrenerEsmeraldo-like.gff             \\
         --build-directory build/tcruzi --min-sl-length 12
     """)
@@ -96,8 +83,12 @@ def parse_input():
                         help='RNA-Seq FASTQ glob string')
     parser.add_argument('-d', '--build-directory', required=True,
                         help='Directory to save output to')
-    parser.add_argument('-f', '--fasta-genome', dest='genome', required=True,
-                        help='Genome sequence FASTA filepath')
+    parser.add_argument('-f1', '--target-genome', dest='target_genome',
+                        required=True, help=('Genome sequence FASTA filepath '
+                        'for target species'))
+    parser.add_argument('-f2', '--filter-genome', dest='nontarget_genome', 
+                        required=True, help=('Genome sequence FASTA filepath '
+                              'for species to filter out prior to mapping.'))
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
                         help='Genome annotation GFF')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
@@ -115,18 +106,19 @@ def parse_input():
     parser.add_argument('-w', '--window-size', default=10000, type=int,
                         help=('Number of bases up or downstream of feature to'
                               'scan for related genes (default=10000)'))
-    parser.add_argument('-t', '--num-threads', default=4, type=int,
+    parser.add_argument('--num-threads', default=4, type=int,
                         help='Number of threads to use.')
-    parser.add_argument('-a', '--author', help='Author contact name', 
+    parser.add_argument('--author', help='Author contact name', 
                         default='')
-    parser.add_argument('-c', '--email', help='Author contact email address',
+    parser.add_argument('--email', help='Author contact email address',
                         default='')
 
     # Parse arguments
     args = parser.parse_args()
 
     # Replace any environmental variables and return args
-    args.genome = os.path.expandvars(args.genome)
+    args.target_genome = os.path.expandvars(args.target_genome)
+    args.nontarget_genome = os.path.expandvars(args.nontarget_genome)
     args.input_reads = os.path.expandvars(args.input_reads)
     args.gff = os.path.expandvars(args.gff)
 
@@ -633,7 +625,7 @@ def remove_false_hits(feature_name, build_dir, sample_id, read_num):
     """Remove reads that map to genome before trimming"""
     output_dir = ('%s/%s/tophat/%s_unfiltered_untrimmed' % (
         build_dir, sample_id, read_num))
-    genome = os.path.splitext(args.genome)[0]
+    genome = os.path.splitext(args.target_genome)[0]
 
     # input read base directory
     basedir = '%s/%s/fastq' % (build_dir, sample_id)
@@ -705,7 +697,7 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
     output_dir = '%s/%s/tophat/%s_filtered_trimmed' % (
         build_dir, sample_id, read_num
     )
-    genome = os.path.splitext(args.genome)[0]
+    genome = os.path.splitext(args.target_genome)[0]
 
     loggers[sample_id][feature_name][read_num].info(
         "# Mapping filtered reads back to genome"
@@ -1029,11 +1021,10 @@ def output_coordinates(results, feature_name, filepath):
 # parse input
 args = parse_input()
 
-# analysis type (sl/poly-a)
-#analysis_type = ('spliced_leader' if args.spliced_leader is not None else
-#                 'poly-a')
+# Shared directory
+shared_build_dir = os.path.join(args.build_directory, 'common')
 
-# create a unique build path for specified parameters
+# Create a unique build paths for specified parameters
 
 # SL sub-directory
 sl_build_dir = os.path.join(
@@ -1079,9 +1070,19 @@ for filepath in glob.glob(input_globstr):
     # get hpgl id
     sample_ids_all.append(re.match('.*(HPGL[0-9]+).*', filepath).groups()[0])
 
+
 # create subdirs based on matching parameters
 for sample_id in sample_ids:
-    # create build directories
+    # shared directories
+    for sub_dir in ['fastq/nontarget_reads_removed',
+                    'fastq/genomic_reads_removed',
+                    'tophat/mapped_to_nontarget',
+                    'tophat/mapped_to_target_untrimmed']:
+        outdir = os.path.join(shared_build_dir, sample_id, sub_dir)
+        if not os.path.exists(outdir):
+            os.makedirs(outdir, mode=0o755)
+
+    # parameter- and feature-specific directories
     for base_dir in [sl_build_dir, polya_build_dir, polyt_build_dir]:
         for sub_dir in ['fastq/filtered', 'fastq/unfiltered', 'ruffus', 
                         'results', 'log', 'tophat']:
@@ -1144,42 +1145,62 @@ for sample_id in sample_ids_all:
 #-----------------------------------------------------------------------------
 # Ruffus tasks
 #-----------------------------------------------------------------------------
-def check_for_bowtie_index():
+def check_for_bowtie_indices():
     """check for bowtie 2 indices and create if needed"""
-    genome = os.path.splitext(args.genome)[0]
+    # check index for target species
+    genome1= os.path.splitext(args.target_genome)[0]
 
     # if index exists, stop here
-    if os.path.exists('%s.1.bt2' % genome):
+    if os.path.exists('%s.1.bt2' % genome1):
         return
 
     # otherwise, create bowtie2 index
-    logging.info("# Building bowtie2 index for %s" % args.genome)
-    bowtie_cmd = (['bowtie2-build', args.genome, genome])
+    logging.info("# Building bowtie2 index for %s" % args.target_genome)
+    bowtie_cmd = (['bowtie2-build', args.target_genome, genome1])
     logging.info("# Command:\n" + " ".join(bowtie_cmd))
     ret = subprocess.call(bowtie_cmd)
 
-def check_for_genome_fasta():
-    """Checks to make sure the genome fasta exists and is available as a .fa
-    file; required by Tophat."""
-    genome = os.path.splitext(args.genome)[0]
+    # check index for nontarget species
+    genome2 = os.path.splitext(args.nontarget_genome)[0]
 
     # if index exists, stop here
-    if os.path.exists('%s.fa' % genome):
+    if os.path.exists('%s.1.bt2' % genome2):
         return
-    elif os.path.exists('%s.fasta' % genome):
-        # if .fasta file exists, but not .fa, create a symlink
-        logging.info("# Creating symlink to %s for Tophat" % args.genome)
-        os.symlink(genome + '.fasta', genome + '.fa')
-    else:
-        raise IOError("Missing genome file")
 
-#-----------------------------------------------------------------------------
-# Step 1: Find reads with sequence of interest
-#
-# Finds reads containing a minimum number of bases of the feature of interest;
-# either a portion of the spliced leader (SL) sequence, or a Poly(A) or Poly(T)
-# tract in the expected location for a polyadenylation event.
-#-----------------------------------------------------------------------------
+    # otherwise, create bowtie2 index
+    logging.info("# Building bowtie2 index for %s" % args.nontarget_genome)
+    bowtie_cmd = (['bowtie2-build', args.nontarget_genome, genome2])
+    logging.info("# Command:\n" + " ".join(bowtie_cmd))
+    ret = subprocess.call(bowtie_cmd)
+
+def check_genome_fastas():
+    """Checks to make sure the genome fasta exists and is available as a .fa
+    file; required by Tophat."""
+    # First, check target genome
+    target_genome = os.path.splitext(args.target_genome)[0]
+
+    # if index exists, continue to next genome
+    if os.path.exists('%s.fa' % target_genome):
+        pass
+    elif os.path.exists('%s.fasta' % target_genome):
+        # if .fasta file exists, but not .fa, create a symlink
+        logging.info("# Creating symlink to %s for Tophat" % args.target_genome)
+        os.symlink(target_genome + '.fasta', target_genome + '.fa')
+    else:
+        raise IOError("Missing target genome file")
+
+    # Next, check filter genome
+    nontarget_genome = os.path.splitext(args.nontarget_genome)[0]
+
+    # if index exists, continue to next genome
+    if os.path.exists('%s.fa' % nontarget_genome):
+        pass
+    elif os.path.exists('%s.fasta' % nontarget_genome):
+        # if .fasta file exists, but not .fa, create a symlink
+        logging.info("# Creating symlink to %s for Tophat" % args.nontarget_genome)
+        os.symlink(nontarget_genome + '.fasta', nontarget_genome + '.fa')
+    else:
+        raise IOError("Missing filter genome file")
 
 # Input regular expression
 #
@@ -1198,8 +1219,34 @@ def check_for_genome_fasta():
 # \3 - _anything_between_id_and_read_num_
 # \4 - R1/R2
 # \5 - _anything_after_read_num_
-@follows(check_for_bowtie_index)
-@follows(check_for_genome_fasta)
+
+#-----------------------------------------------------------------------------
+# Step 1: Filter nontarget reads
+#
+# Before looking for spliced leader (SL) and Poly(A) reads, we will first
+# remove any reads which come from an unrelated species such as host cells used
+# to culture the target species.
+#-----------------------------------------------------------------------------
+@follows(check_for_bowtie_indices)
+@follows(check_genome_fastas)
+@transform(args.input_reads,
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % sl_build_dir,
+           r'\2', r'\4')
+def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
+    # We only need to map once for each mated pair
+    if read_num != "R1":
+        return
+
+#-----------------------------------------------------------------------------
+# Step 1: Find reads with sequence of interest
+#
+# Finds reads containing a minimum number of bases of the feature of interest;
+# either a portion of the spliced leader (SL) sequence, or a Poly(A) or Poly(T)
+# tract in the expected location for a polyadenylation event.
+#-----------------------------------------------------------------------------
+@follows(check_for_bowtie_indices)
+@follows(check_genome_fastas)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_sl_reads' % sl_build_dir,
