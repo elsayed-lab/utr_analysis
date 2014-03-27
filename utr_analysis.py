@@ -64,11 +64,12 @@ def parse_input():
     usage_examples=textwrap.dedent("""\
     Usage Example:
     --------------
-    ./utr_analysis.py                                              \\
-        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq"           \\
-        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                 \\
+    ./utr_analysis.py                                               \\
+        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq"            \\
+        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \\
         -f1 TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
-        -g TrypDB-7.0_TcruziCLBrenerEsmeraldo-like.gff             \\
+        -f2 mm10.fasta                                              \\
+        -g TrypDB-7.0_TcruziCLBrenerEsmeraldo-like.gff              \\
         --build-directory build/tcruzi --min-sl-length 12
     """)
 
@@ -87,7 +88,7 @@ def parse_input():
     parser.add_argument('-f1', '--target-genome', dest='target_genome',
                         required=True, help=('Genome sequence FASTA filepath '
                         'for target species'))
-    parser.add_argument('-f2', '--filter-genome', dest='nontarget_genome', 
+    parser.add_argument('-f2', '--nontarget-genome', dest='nontarget_genome', 
                         required=True, help=('Genome sequence FASTA filepath '
                               'for species to filter out prior to mapping.'))
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
@@ -305,13 +306,17 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, mode=0o755)
 
+    # FASTA filename without extension
+    genome_basename = os.path.splitext(genome)[0]
+
     # @NOTE 2014/02/06 -- Tophat 2.0.10 fails for some reads when attempting
     # to use more than one thread. For now, just perform the mapping
     # using a single-thread to be safe...
 
     # build command
     cmd = "tophat --num-threads %d --max-multihits %d %s -o %s %s %s %s" % (
-           num_threads, max_multihits, extra_args, output_dir, genome, r1, r2)
+           num_threads, max_multihits, extra_args, 
+           output_dir, genome_basename, r1, r2)
 
     # run tophat
     ret = run_command(cmd, log_handle)
@@ -366,7 +371,8 @@ def filter_mapped_reads(r1_infile, r2_infile, r1_outfile, r2_outfile, genome,
         Handler to use for logging.
     """
     # map nontarget reads
-    ret = run_tophat(output_dir, genome, log_handle, r1_infile, r2_infile)
+    ret = run_tophat(output_dir, genome, log_handle, r1_infile, r2_infile,
+            extra_args='--no-mixed')
 
     # Make sure tophat succeeded
     if ret != 0:
@@ -672,7 +678,6 @@ def remove_false_hits(feature_name, build_dir, sample_id, read_num):
     """Remove reads that map to genome before trimming"""
     output_dir = ('%s/%s/tophat/%s_unfiltered_untrimmed' % (
         build_dir, sample_id, read_num))
-    genome = os.path.splitext(args.target_genome)[0]
 
     # input read base directory
     basedir = '%s/%s/fastq' % (build_dir, sample_id)
@@ -695,7 +700,7 @@ def remove_false_hits(feature_name, build_dir, sample_id, read_num):
         "# Mapping full reads containing sequence match to find false\n"
         "# hits (reads that correspond to actual features in the genome)"
     )
-    ret = run_tophat(output_dir, genome, 
+    ret = run_tophat(output_dir, args.target_genome, 
                      loggers[sample_id][feature_name][read_num],
                      r1_filepath, r2_filepath,
                      extra_args='--mate-inner-dist 170 --no-mixed')
@@ -744,7 +749,6 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
     output_dir = '%s/%s/tophat/%s_filtered_trimmed' % (
         build_dir, sample_id, read_num
     )
-    genome = os.path.splitext(args.target_genome)[0]
 
     loggers[sample_id][feature_name][read_num].info(
         "# Mapping filtered reads back to genome"
@@ -776,7 +780,7 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
 
     # Map reads using Tophat
     #  --no-mixed ?
-    ret = run_tophat(output_dir, genome,
+    ret = run_tophat(output_dir, args.target_genome,
                  loggers[sample_id][feature_name][read_num],
                  r1_filepath, r2_filepath,
                  extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
@@ -1293,8 +1297,8 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
         r2_output_file = output_file.replace("R1", "R2")
 
         # Wait for R1 task to finish processing and then mark as finished
-        while (!os.path.exists(output_file):
-            sleep(120)
+        while not os.path.exists(output_file):
+            time.sleep(120)
 
         # Mark as finished an dexit
         open(r2_output_file, 'w').close()
@@ -1342,8 +1346,8 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
         r2_output_file = output_file.replace("R1", "R2")
 
         # Wait for R1 task to finish processing and then mark as finished
-        while (!os.path.exists(output_file):
-            sleep(120)
+        while not os.path.exists(output_file):
+            time.sleep(120)
 
         # Mark as finished an dexit
         open(r2_output_file, 'w').close()
@@ -1595,7 +1599,9 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
 # Run pipeline
 #-----------------------------------------------------------------------------
 if __name__ == "__main__":
-    pipeline_run([compute_polyt_coordinates], logger=logging.getLogger(''),
+    #pipeline_run([compute_polyt_coordinates], logger=logging.getLogger(''),
+    #             multiprocess=args.num_threads)
+    pipeline_run([filter_genomic_reads], logger=logging.getLogger(''),
                  multiprocess=args.num_threads)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
                             [compute_polyt_coordinates])
