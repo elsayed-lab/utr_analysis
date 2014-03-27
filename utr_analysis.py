@@ -33,6 +33,7 @@ import csv
 import sys
 import glob
 import gzip
+import time
 import pysam
 import random
 import logging
@@ -341,6 +342,52 @@ def gzip_str(filepath, strbuffer):
     fp = gzip.open(outfile, 'wb')
     fp.write(strbuffer.read())
     fp.close()
+
+def filter_mapped_reads(r1_infile, r2_infile, r1_outfile, r2_outfile, genome, 
+                        output_dir, log_handle):
+    """
+    Maps reads using tophat and discards any that align to the genome.
+
+    Parameters
+    ----------
+    r1_infile: str
+        Filepath to R1 reads to be filtered.
+    r2_infile: str
+        Filepath to R2 reads to be filtered.
+    r1_outfile: str
+        Filepath to save filtered R1 reads to
+    r2_outfile: str
+        Filepath to save filtered R2 reads to
+    genome: str
+        Filepath to genome FASTA to map reads against
+    output_dir: str
+        Directory to save tophat output to
+    log_handle: logging.Handle
+        Handler to use for logging.
+    """
+    # map nontarget reads
+    ret = run_tophat(output_dir, genome, log_handle, r1_infile, r2_infile)
+
+    # Make sure tophat succeeded
+    if ret != 0:
+        log_handle.error("# Error running tophat (%s)!" % genome)
+        sys.exit()
+
+    # Keep only the reads which did not map to the specified genome
+    sam = pysam.Samfile(os.path.join(output_dir, 'unmapped.bam'), 'rb')
+    good_ids = [x.qname for x in sam]
+
+    # number of reads before filtering
+    num_reads_before = num_lines(r1_infile) / 4
+    log_handle.info(
+        "# Ignoring %d reads which mapped to an specified genome (%d total)" %
+        (num_reads_before - len(good_ids), num_reads_before)
+    )
+
+    # Create filtered versions of R1 (and R2) fastq files with only the un-
+    # Filepaths
+    filter_fastq(r1_infile, r2_infile, r2_outfile, r2_outfile, 
+                 good_ids, log_handle)
 
 def filter_fastq(infile1, infile2, outfile1, outfile2, read_ids, log_handle):
     """Takes a filepath to a FASTQ file and returns a new version of the file
@@ -1074,7 +1121,8 @@ for filepath in glob.glob(input_globstr):
 # create subdirs based on matching parameters
 for sample_id in sample_ids:
     # shared directories
-    for sub_dir in ['fastq/nontarget_reads_removed',
+    for sub_dir in ['ruffus',
+                    'fastq/nontarget_reads_removed',
                     'fastq/genomic_reads_removed',
                     'tophat/mapped_to_nontarget',
                     'tophat/mapped_to_target_untrimmed']:
@@ -1108,8 +1156,14 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger('').addHandler(console)
 
+# get version information
+from ruffus import __version__ as ruffus_version
+from Bio import __version__ as biopython_version
+
 logging.info("# Starting UTR Analysis")
 logging.info("# Python %s" % sys.version)
+logging.info("# Ruffus %s" % ruffus_version)
+logging.info("# Biopython %s" % biopython_version)
 logging.info("# Command:\n%s" % " ".join(sys.argv))
 
 # create dictionary of log handlers for sample-specific info
@@ -1231,11 +1285,19 @@ def check_genome_fastas():
 @follows(check_genome_fastas)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
-           r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % sl_build_dir,
+           r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
     # We only need to map once for each mated pair
     if read_num != "R1":
+        r2_output_file = output_file.replace("R1", "R2")
+
+        # Wait for R1 task to finish processing and then mark as finished
+        while (!os.path.exists(output_file):
+            sleep(120)
+
+        # Mark as finished an dexit
+        open(r2_output_file, 'w').close()
         return
 
     # output directories
@@ -1245,51 +1307,82 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
                           'fastq', 'nontarget_reads_removed')
 
     # read locations
-    r1 = input_file
-    r2 = input_file.replace("R1", "R2")
-
-    # map nontarget reads
-    ret = run_tophat(tophat_dir, args.nontarget_genome, console, r1, r2)
-
-    # Make sure tophat succeeded
-    if ret != 0:
-        logging.error("# Error running tophat (nontarget)! %s" % (sample_id))
-        sys.exit()
-
-    # Keep only the reads which did not map to the nontarget genome; any that
-    # did map here come from a species we are not interested in
-    sam = pysam.Samfile(os.path.join(tophat_dir, 'unmapped.bam'), 'rb')
-    good_ids = [x.qname for x in sam]
-
-    # number of reads before filtering
-    num_reads_before = num_lines(r1) / 4
-    console.info(
-        "# Ignoring %d reads which mapped to an unrelated genome (%d total)" %
-        (num_reads_before - len(good_ids), num_reads_before)
-    )
+    r1_infile = input_file
+    r2_infile = input_file.replace("R1", "R2")
 
     # output fastq filepaths
-    r1_outfile = os.path.join(fastq_dir, "%s_%s_nontarget_removed.fastq.gz" %
-                              (sample_id, read_num))
+    r1_outfile = os.path.join(fastq_dir,
+        "%s_%s_nontarget_reads_removed.fastq.gz" % (sample_id, read_num))
     r2_outfile = r1_outfile.replace("R1", "R2")
 
-    # Create filtered versions of R1 (and R2) fastq files with only the un-
-    # Filepaths
-    filter_fastq(r1, r2, r2_outfile, r2_outfile, good_ids, console)
+    # map reads and remove hits
+    filter_mapped_reads(r1_infile, r2_infile, r1_outfile, r2_outfile,
+                        args.nontarget_genome, tophat_dir, logging)
+    logging.info("# Finished removing nontarget reads.")
 
     # Let ruffus know we are finished
     open(output_file, 'w').close()
-    console.info("# Finished removing nontarget reads.")
+
 
 #-----------------------------------------------------------------------------
-# Step X: Find reads with sequence of interest
+# Step 2: Filter genomic reads
+#
+# The next step is to remove reads which map to the target genome before any
+# trimming. These reads likely represent actual features in the genome and not
+# the capped or polyadenylated reads we are interested in.
+#-----------------------------------------------------------------------------
+@follows(filter_nontarget_reads)
+@transform(args.input_reads,
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           r'%s/\2/ruffus/\2_\4.filter_genomic_reads' % shared_build_dir,
+           r'\2', r'\4')
+def filter_genomic_reads(input_file, output_file, sample_id, read_num):
+    # We only need to map once for each mated pair
+    if read_num != "R1":
+        r2_output_file = output_file.replace("R1", "R2")
+
+        # Wait for R1 task to finish processing and then mark as finished
+        while (!os.path.exists(output_file):
+            sleep(120)
+
+        # Mark as finished an dexit
+        open(r2_output_file, 'w').close()
+        return
+
+    # output directories
+    tophat_dir = os.path.join(shared_build_dir, sample_id,
+                              'tophat', 'mapped_to_target_untrimmed')
+    input_fastq_dir = os.path.join(shared_build_dir, sample_id,
+                                  'fastq', 'nontarget_reads_removed')
+    output_fastq_dir = os.path.join(shared_build_dir, sample_id,
+                                   'fastq', 'genomic_reads_removed')
+
+    # read locations
+    r1_infile = os.path.join(input_fastq_dir,
+        "%s_%s_nontarget_reads_removed.fastq.gz" % (sample_id, read_num))
+    r2_infile = r1_infile.replace("R1", "R2")
+
+    # output fastq filepaths
+    r1_outfile = os.path.join(output_fastq_dir, 
+        "%s_%s_genomic_reads_removed.fastq.gz" % (sample_id, read_num))
+    r2_outfile = r1_outfile.replace("R1", "R2")
+
+    # map reads and remove hits
+    filter_mapped_reads(r1_infile, r2_infile, r1_outfile, r2_outfile,
+                        args.target_genome, tophat_dir, logging)
+    logging.info("# Finished removing genomic reads.")
+
+    # Let ruffus know we are finished
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
+# Step 3: Find reads with sequence of interest
 #
 # Finds reads containing a minimum number of bases of the feature of interest;
 # either a portion of the spliced leader (SL) sequence, or a Poly(A) or Poly(T)
 # tract in the expected location for a polyadenylation event.
 #-----------------------------------------------------------------------------
-@follows(check_for_bowtie_indices)
-@follows(check_genome_fastas)
+@follows(filter_genomic_reads)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
            r'%s/\2/ruffus/\2_\4.find_sl_reads' % sl_build_dir,
