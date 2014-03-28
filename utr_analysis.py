@@ -321,15 +321,36 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     # run tophat
     ret = run_command(cmd, log_handle)
 
-    # check to see if tophat succeeded
+    # check to see if tophat succeeded and stop execution otherwise
     if ret != 0:
-        return ret
+        log_handle.error("# Error running tophat (%s)!" % genome)
+        sys.exit()
 
     # sort and index bam output using samtools
     sort_and_index(os.path.join(output_dir, 'accepted_hits'), log_handle)
     sort_and_index(os.path.join(output_dir, 'unmapped'), log_handle)
 
     return 0
+
+def run_bam2fastx(bam, fastq, log_handle):
+    """
+    Uses the tophat bam2fastx tool to convert a bam file to fastq
+
+    Parameters
+    ----------
+    bam: str
+        Input bam file
+    fastq: str
+        Output fastq file
+    """
+    #bam2fastx parameters:
+    #    -q fastq
+    #    -A all reads
+    #    -P pair-end
+    #    -o output filepath
+    cmd = "bam2fastx -q -A -P -o %s %s" % (fastq, bam)
+
+    return run_command(cmd, log_handle)
 
 def gzip_str(filepath, strbuffer):
     """Takes a StringIO buffer and writes the output to a gzip-compressed
@@ -348,132 +369,43 @@ def gzip_str(filepath, strbuffer):
     fp.write(strbuffer.read())
     fp.close()
 
-def filter_mapped_reads(r1_infile, r2_infile, r1_outfile, r2_outfile, genome, 
-                        output_dir, log_handle):
+def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
     """
     Maps reads using tophat and discards any that align to the genome.
 
     Parameters
     ----------
-    r1_infile: str
+    r1: str
         Filepath to R1 reads to be filtered.
-    r2_infile: str
+    r2: str
         Filepath to R2 reads to be filtered.
-    r1_outfile: str
-        Filepath to save filtered R1 reads to
-    r2_outfile: str
-        Filepath to save filtered R2 reads to
     genome: str
         Filepath to genome FASTA to map reads against
-    output_dir: str
+    tophat_dir: str
         Directory to save tophat output to
+    output_fastq: str
+        Filepath to save filtered FASTQ files to
     log_handle: logging.Handle
         Handler to use for logging.
     """
-    # map nontarget reads
-    ret = run_tophat(output_dir, genome, log_handle, r1_infile, r2_infile,
-            extra_args='--no-mixed')
+    # map reads to nontarget genome using tophat
+    ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
+                     extra_args='--no-mixed')
 
-    # Make sure tophat succeeded
-    if ret != 0:
-        log_handle.error("# Error running tophat (%s)!" % genome)
-        sys.exit()
-
-    # Keep only the reads which did not map to the specified genome
-    sam = pysam.Samfile(os.path.join(output_dir, 'unmapped.bam'), 'rb')
-    good_ids = [x.qname for x in sam]
+    # bam / fastq filepaths
+    bam_input = os.path.join(tophat_dir, 'unmapped_sorted.bam')
 
     # number of reads before filtering
-    num_reads_before = num_lines(r1_infile) / 4
+    num_reads_total = num_lines(r1) / 4
+    num_unmapped = num_lines(bam_input) / 2
+
     log_handle.info(
         "# Ignoring %d reads which mapped to an specified genome (%d total)" %
-        (num_reads_before - len(good_ids), num_reads_before)
+        (num_reads_toal - num_unmapped, num_unmapped)
     )
 
-    # Create filtered versions of R1 (and R2) fastq files with only the un-
-    # Filepaths
-    filter_fastq(r1_infile, r2_infile, r2_outfile, r2_outfile, 
-                 good_ids, log_handle)
-
-def filter_fastq(infile1, infile2, outfile1, outfile2, read_ids, log_handle):
-    """Takes a filepath to a FASTQ file and returns a new version of the file
-    which contains only reads with the specified ids"""
-    if infile1.endswith('.gz'):
-        fastq1 = gzip.open(infile1, 'rb')
-        fastq2 = gzip.open(infile2, 'rb')
-    else:
-        fastq1 = open(infile1)
-        fastq2 = open(infile2)
-
-    filtered_reads1 = StringIO.StringIO()
-    filtered_reads2 = StringIO.StringIO()
-
-    # get number of reads to be searched
-    num_reads = num_lines(infile1) / 4
-    hundreth = int(round(num_reads / 100))
-    show_progress = len(read_ids) >= 10000
-
-    # normalize fastq ids and ignore right-part of id row, including the
-    # mated pair read number, during comparision
-    read_ids = [x.split()[0].strip('@') for x in read_ids]
-
-    # remove redundant entries
-    read_ids = list(set(read_ids))
-
-    # read ids may be semi-sorted which can be bad for indexing performance;
-    # shuffle to speed things up
-    random.shuffle(read_ids)
-
-    log_handle.info("# Filtering fastq for %d matched reads" % len(read_ids))
-
-    # mated reads handle
-    mated_reads = readfq(fastq2)
-
-    # iterate through each entry in fastq file
-    for i, read in enumerate(readfq(fastq1), 1):
-        mated_read = mated_reads.next()
-
-        # log progress for large numbers of records
-        if show_progress and (i % hundreth) == 0:
-            log_handle.info('# %2d%%' % round(i / float(hundreth)))
-
-        # normalized entry id
-        fastq_id = read[ID_IDX].split()[0].strip('@')
-
-        # check to see if it is in the filtered list
-        try:
-            idx = read_ids.index(fastq_id)
-        except ValueError:
-            idx = None
-
-        # if it is, add to filtered output
-        if idx is not None:
-            # read 1
-            fastq_entry1 = [read[ID_IDX], read[SEQUENCE_IDX], "+", 
-                            read[QUALITY_IDX]]
-            filtered_reads1.write("\n".join(fastq_entry1) + "\n")
-
-            # read 2
-            fastq_entry2 = [mated_read[ID_IDX], mated_read[SEQUENCE_IDX], "+", 
-                            mated_read[QUALITY_IDX]]
-            filtered_reads2.write("\n".join(fastq_entry2) + "\n")
-
-
-            # remove id from list to reduce search space in future iterations
-            read_ids.pop(idx)
-
-        # exit loop when all ids have been found
-        if len(read_ids) == 0:
-            break
-
-    log_handle.info(' # 100%')
-    log_handle.info(' # Done filtering')
-
-    # write matching paired-end reads to compressed fastq
-    gzip_str(outfile1, filtered_reads1)
-    gzip_str(outfile2, filtered_reads2)
-    filtered_reads1.close()
-    filtered_reads2.close()
+    # keep unampped reads
+    run_bam2fastx(bam_input, output_fastq, log_handle)
 
 def get_next_log_name(base_name):
     """Returns a filepath for the next highest log number"""
@@ -1254,14 +1186,12 @@ def check_genome_fastas():
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
     # We only need to map once for each mated pair
     if read_num != "R1":
-        r2_output_file = output_file.replace("R1", "R2")
-
         # Wait for R1 task to finish processing and then mark as finished
         while not os.path.exists(output_file):
             time.sleep(120)
 
         # Mark as finished an dexit
-        open(r2_output_file, 'w').close()
+        open(output_file.replace("R1", "R2"), 'w').close()
         return
 
     # output directories
@@ -1271,17 +1201,16 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
                           'fastq', 'nontarget_reads_removed')
 
     # read locations
-    r1_infile = input_file
-    r2_infile = input_file.replace("R1", "R2")
+    r1 = input_file
+    r2 = r1.replace("R1", "R2")
 
     # output fastq filepaths
-    r1_outfile = os.path.join(fastq_dir,
-        "%s_%s_nontarget_reads_removed.fastq.gz" % (sample_id, read_num))
-    r2_outfile = r1_outfile.replace("R1", "R2")
+    output_fastq = os.path.join(
+        fastq_dir, "%s_nontarget_reads_removed.fastq.gz" % (sample_id))
 
     # map reads and remove hits
-    filter_mapped_reads(r1_infile, r2_infile, r1_outfile, r2_outfile,
-                        args.nontarget_genome, tophat_dir, logging)
+    filter_mapped_reads(r1, r2, args.nontarget_genome, tophat_dir,
+                        output_fastq, logging)
     logging.info("# Finished removing nontarget reads.")
 
     # Let ruffus know we are finished
@@ -1303,14 +1232,12 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
 def filter_genomic_reads(input_file, output_file, sample_id, read_num):
     # We only need to map once for each mated pair
     if read_num != "R1":
-        r2_output_file = output_file.replace("R1", "R2")
-
         # Wait for R1 task to finish processing and then mark as finished
         while not os.path.exists(output_file):
             time.sleep(120)
 
         # Mark as finished an dexit
-        open(r2_output_file, 'w').close()
+        open(output_file.replace("R1", "R2"), 'w').close()
         return
 
     # output directories
@@ -1322,18 +1249,17 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
                                    'fastq', 'genomic_reads_removed')
 
     # read locations
-    r1_infile = os.path.join(input_fastq_dir,
-        "%s_%s_nontarget_reads_removed.fastq.gz" % (sample_id, read_num))
-    r2_infile = r1_infile.replace("R1", "R2")
+    r1 = os.path.join(input_fastq_dir, 
+                      "%s_nontarget_reads_removed.1.fastq.gz" % (sample_id))
+    r2 = r1_infile.replace(".1", ".2")
 
     # output fastq filepaths
-    r1_outfile = os.path.join(output_fastq_dir, 
-        "%s_%s_genomic_reads_removed.fastq.gz" % (sample_id, read_num))
-    r2_outfile = r1_outfile.replace("R1", "R2")
+    output_fastq = os.path.join(
+        output_fastq_dir, "%s_genomic_reads_removed.fastq.gz" % (sample_id))
 
     # map reads and remove hits
-    filter_mapped_reads(r1_infile, r2_infile, r1_outfile, r2_outfile,
-                        args.target_genome, tophat_dir, logging)
+    filter_mapped_reads(r1, r2, args.target_genome, tophat_dir, output_fastq, 
+                        logging)
     logging.info("# Finished removing genomic reads.")
 
     # Let ruffus know we are finished
@@ -1533,6 +1459,20 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
         "# Computing coordinates for mapped polyadenylation events [2/2]")
     compute_coordinates('polyt', polyt_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#
+# Combine results
+#
+@collate(compute_polyt_coordinates,
+         regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).compute_polyt_coordinates'),
+         r'\1/all.combine_results')
+def combine_results(input_files, output_file):
+    logging.info(
+        "# Combining results and filtering out sites with low support")
+    # TEST
+    print("INPUT FILES:")
+    print(input_files)
     open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
