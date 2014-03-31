@@ -89,8 +89,8 @@ def parse_input():
                         required=True, help=('Genome sequence FASTA filepath '
                         'for target species'))
     parser.add_argument('-f2', '--nontarget-genome', dest='nontarget_genome', 
-                        required=True, help=('Genome sequence FASTA filepath '
-                              'for species to filter out prior to mapping.'))
+                        help=('Genome sequence FASTA filepath for species to '
+                              'be filtered out prior to mapping. (optional)'))
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
                         help='Genome annotation GFF')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
@@ -120,9 +120,11 @@ def parse_input():
 
     # Replace any environmental variables and return args
     args.target_genome = os.path.expandvars(args.target_genome)
-    args.nontarget_genome = os.path.expandvars(args.nontarget_genome)
     args.input_reads = os.path.expandvars(args.input_reads)
     args.gff = os.path.expandvars(args.gff)
+
+    if args.nontarget_genome:
+        args.nontarget_genome = os.path.expandvars(args.nontarget_genome)
 
     # set defaults for author if none is specified
     if args.author is "":
@@ -154,7 +156,9 @@ def readfq(fp):
     while True: # mimic closure; is it a bad idea?
         if not last: # the first record or a record following a fastq
             for l in fp: # search for the start of the next record
+                # 2013/03/31 Bug fix (keith)
                 if l[0] in '>@': # fasta/q header line
+                #if l[:4] == '@HWI': # Illumina fastq header line
                     last = l[:-1] # save this line
                     break
         if not last: break
@@ -163,7 +167,9 @@ def readfq(fp):
         # name, seqs, last = last[1:].partition(" ")[0], [], None
         name, seqs, last = last, [], None
         for l in fp: # read the sequence
+            # Keith 2014/03/31
             if l[0] in '@+>':
+            #if l[0] == '+' or l[:4] == '@HWI':
                 last = l[:-1]
                 break
             seqs.append(l[:-1])
@@ -242,6 +248,7 @@ def sort_and_index(base_output, log_handle):
     # index bam
     index_cmd = 'samtools index %s' % (base_output + '_sorted.bam')
     run_command(index_cmd, log_handle)
+    log_handle.info("# Done sorting and indexing")
 
 #def add_sam_header(filepath, description, author, email, cmd):
     #"""Adds a header to a sam file including some information about how the
@@ -394,21 +401,21 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
 
     # check to see if tophat output already exists
     if not os.path.exists(bam_input):
-        # map reads to nontarget genome using tophat
+        # map reads to genome using tophat
+        log_handle.info("# Mapping against %s" % os.path.basename(genome))
         ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
                         extra_args='--no-mixed')
-
 
         # number of reads before filtering
         num_reads_total = num_lines(r1) / 4
         num_unmapped = num_lines(bam_input) / 2
 
         log_handle.info(
-            "# Ignoring %d reads which mapped to an specified genome (%d total)" %
+            "# Ignoring %d reads which mapped to specified genome (%d total)" %
             (num_reads_toal - num_unmapped, num_unmapped)
         )
     else:
-        log_handle.info("# Skipping nontarget mapping: output already exists")
+        log_handle.info("# Skipping %s: output already exists" % tophat_dir)
 
     # keep unampped reads
     log_handle.info("# Converting Tophat bam output to FASTQ")
@@ -479,6 +486,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     """
     # logger
     log = loggers[sample_id][feature_name][read_num]
+    log.info("# Processing %s" % os.path.basename(input_file))
 
     # list to keep track of potential matches
     matches = []
@@ -492,7 +500,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
     # mated reads
     read_num_other = "R1" if read_num == "R2" else "R2"
-    input_file_mated = input_file.replace(read_num, read_num_other)
+    input_file_mated = input_file.replace("." + read_num[-1],
+                                          "." + read_num_other[-1])
     output_mated_reads = "%s_%s.fastq" % (output_base[:-2], read_num_other)
 
     # compile regex
@@ -502,7 +511,6 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     num_reads = num_lines(input_file) / 4
 
     # Start sample log
-    log.info("# Processing %s" % os.path.basename(input_file))
     log.info("# Scanning %d reads for %s" % (num_reads, feature_name))
     log.info("# Using Regex patten:\n %s" % feature_regex)
 
@@ -515,8 +523,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     read_ids = []
 
     # Find all reads containing the sequence of interest
-    fastq = open(input_file)
-    fastq_mated = open(input_file_mated)
+    fastq = gzip.open(input_file, 'rb')
+    fastq_mated = gzip.open(input_file_mated, 'rb')
 
     # iterate over mated reads at same time
     mated_reads = readfq(fastq_mated)
@@ -622,10 +630,10 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
     # input read base directory
     basedir = '%s/%s/fastq' % (build_dir, sample_id)
 
-    # R1 filepath (including matched sequence)
+    # R1 input filepath (including matched sequence)
     if (read_num == 'R1'):
         r1_filepath = (
-            '%s/filtered/%s_R1_1_%s_trimmed.fastq.gz' %
+            '%s/unfiltered/%s_R1_1_%s_trimmed.fastq.gz' %
             (basedir, sample_id, feature_name)
         )
 
@@ -635,10 +643,10 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
         # If SE, set filepath to empty string
         if not os.path.exists(r2_filepath):
             r2_filepath = ""
-    # R2
+    # R2 input filepath
     else:
         r2_filepath = (
-            '%s/filtered/%s_R2_2_%s_trimmed.fastq.gz' %
+            '%s/unfiltered/%s_R2_2_%s_trimmed.fastq.gz' %
             (basedir, sample_id, feature_name)
         )
         r1_filepath = r2_filepath.replace('2_%s_untrimmed' % feature_name, '1')
@@ -649,13 +657,6 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
                  loggers[sample_id][feature_name][read_num],
                  r1_filepath, r2_filepath,
                  extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
-
-    # Make sure tophat succeeded
-    if ret != 0:
-        logging.error(
-            "# Error running tophat 2/2! %s (%s)" % (sample_id, read_num)
-        )
-        sys.exit()
 
     loggers[sample_id][feature_name][read_num].info(
         "# Finished mapping hits to genome"
@@ -988,13 +989,17 @@ for filepath in glob.glob(input_globstr):
 
 
 # create subdirs based on matching parameters
+shared_subdirs = ['ruffus',
+                  'fastq/genomic_reads_removed',
+                  'tophat/mapped_to_target_untrimmed']
+
+if args.nontarget_genome:
+    shared_subdirs = shared_subdirs + ['fastq/nontarget_reads_removed',
+                                       'tophat/mapped_to_nontarget']
+
 for sample_id in sample_ids:
     # shared directories
-    for sub_dir in ['ruffus',
-                    'fastq/nontarget_reads_removed',
-                    'fastq/genomic_reads_removed',
-                    'tophat/mapped_to_nontarget',
-                    'tophat/mapped_to_target_untrimmed']:
+    for sub_dir in shared_subdirs: 
         outdir = os.path.join(shared_build_dir, sample_id, sub_dir)
         if not os.path.exists(outdir):
             os.makedirs(outdir, mode=0o755)
@@ -1128,6 +1133,10 @@ def check_for_bowtie_indices():
     logging.info("# Command:\n" + " ".join(bowtie_cmd))
     ret = subprocess.call(bowtie_cmd)
 
+    # stop here if we are only mapping to one genome
+    if not args.nontarget_genome:
+        return
+
     # check index for nontarget species
     genome2 = os.path.splitext(args.nontarget_genome)[0]
 
@@ -1164,6 +1173,10 @@ def check_genome_fastas():
     else:
         raise IOError("Missing target genome file")
 
+    # stop here if we are only mapping to one genome
+    if not args.nontarget_genome:
+        return
+
     # Next, check filter genome
     nontarget_genome = os.path.splitext(args.nontarget_genome)[0]
 
@@ -1178,7 +1191,7 @@ def check_genome_fastas():
         raise IOError("Missing filter genome file")
 
 #-----------------------------------------------------------------------------
-# Step 1: Filter nontarget reads
+# Step 1: Filter nontarget reads (Optional)
 #
 # Before looking for spliced leader (SL) and Poly(A) reads, we will first
 # remove any reads which come from an unrelated species such as host cells used
@@ -1191,6 +1204,11 @@ def check_genome_fastas():
            r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
+    # If we are only mapping to a single genome, skip this step
+    if not args.nontarget_genome:
+        open(output_file, 'w').close()
+        return
+
     # We only need to map once for each mated pair
     if read_num == "R2":
         # Wait for R1 task to finish processing and then mark as finished
@@ -1225,7 +1243,6 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
     # Let ruffus know we are finished
     open(output_file, 'w').close()
 
-
 #-----------------------------------------------------------------------------
 # Step 2: Filter genomic reads
 #
@@ -1251,18 +1268,24 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
 
     logging.info("# Removing genomic reads.")
 
-    # output directories
+    # determine source of input reads to use
+    if args.nontarget_genome:
+        # if nontarget genome was specified, use output from that step
+        input_fastq_dir = os.path.join(shared_build_dir, sample_id,
+                                    'fastq', 'nontarget_reads_removed')
+        r1 = os.path.join(input_fastq_dir, 
+                        "%s_nontarget_reads_removed.1.fastq.gz" % (sample_id))
+        r2 = r1.replace(".1", ".2")
+    else:
+        # otherwise use inputs specified at run-time
+        r1 = input_file
+        r2 = r1.replace("R1", "R2")
+
+    # output tophat and fastq directories
     tophat_dir = os.path.join(shared_build_dir, sample_id,
                               'tophat', 'mapped_to_target_untrimmed')
-    input_fastq_dir = os.path.join(shared_build_dir, sample_id,
-                                  'fastq', 'nontarget_reads_removed')
     output_fastq_dir = os.path.join(shared_build_dir, sample_id,
                                    'fastq', 'genomic_reads_removed')
-
-    # read locations
-    r1 = os.path.join(input_fastq_dir, 
-                      "%s_nontarget_reads_removed.1.fastq.gz" % (sample_id))
-    r2 = r1_infile.replace(".1", ".2")
 
     # output fastq filepaths
     output_fastq = os.path.join(
@@ -1317,7 +1340,7 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
     # input reads
     input_reads = os.path.join(
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
-        "%s_%s_genomic_reads_removed.fastq.gz" % (sample_id, read_num))
+        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
     find_sequence(input_reads, 'sl', sl_filter, sl_regex, sl_build_dir, 
                   sample_id, read_num)
@@ -1386,7 +1409,7 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
     # input reads
     input_reads = os.path.join(
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
-        "%s_%s_genomic_reads_removed.fastq.gz" % (sample_id, read_num))
+        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
     find_sequence(input_reads, 'polya', polya_filter, polya_regex, 
                   polya_build_dir, sample_id, read_num, trim_direction='right')
@@ -1442,7 +1465,7 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
     # input reads
     input_reads = os.path.join(
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
-        "%s_%s_genomic_reads_removed.fastq.gz" % (sample_id, read_num))
+        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
     find_sequence(input_reads, 'polyt', polyt_filter, polyt_regex, 
                   polyt_build_dir, sample_id, read_num, reverse=True)
