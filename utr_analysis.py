@@ -1321,6 +1321,7 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
 # the matched sequence comes from a trans-splicing or polyadenylation event,
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
+@transform(find_sl_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
