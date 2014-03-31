@@ -327,6 +327,7 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
         sys.exit()
 
     # sort and index bam output using samtools
+    log_handle.info("# Sorting and indexing Tophat output")
     sort_and_index(os.path.join(output_dir, 'accepted_hits'), log_handle)
     sort_and_index(os.path.join(output_dir, 'unmapped'), log_handle)
 
@@ -388,23 +389,29 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
     log_handle: logging.Handle
         Handler to use for logging.
     """
-    # map reads to nontarget genome using tophat
-    ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
-                     extra_args='--no-mixed')
-
     # bam / fastq filepaths
     bam_input = os.path.join(tophat_dir, 'unmapped_sorted.bam')
 
-    # number of reads before filtering
-    num_reads_total = num_lines(r1) / 4
-    num_unmapped = num_lines(bam_input) / 2
+    # check to see if tophat output already exists
+    if not os.path.exists(bam_input):
+        # map reads to nontarget genome using tophat
+        ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
+                        extra_args='--no-mixed')
 
-    log_handle.info(
-        "# Ignoring %d reads which mapped to an specified genome (%d total)" %
-        (num_reads_toal - num_unmapped, num_unmapped)
-    )
+
+        # number of reads before filtering
+        num_reads_total = num_lines(r1) / 4
+        num_unmapped = num_lines(bam_input) / 2
+
+        log_handle.info(
+            "# Ignoring %d reads which mapped to an specified genome (%d total)" %
+            (num_reads_toal - num_unmapped, num_unmapped)
+        )
+    else:
+        log_handle.info("# Skipping nontarget mapping: output already exists")
 
     # keep unampped reads
+    log_handle.info("# Converting Tophat bam output to FASTQ")
     run_bam2fastx(bam_input, output_fastq, log_handle)
 
 def get_next_log_name(base_name):
@@ -1185,14 +1192,16 @@ def check_genome_fastas():
            r'\2', r'\4')
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
     # We only need to map once for each mated pair
-    if read_num != "R1":
+    if read_num == "R2":
         # Wait for R1 task to finish processing and then mark as finished
-        while not os.path.exists(output_file):
+        while not os.path.exists(output_file.replace("R2", "R1")):
             time.sleep(120)
 
-        # Mark as finished an dexit
-        open(output_file.replace("R1", "R2"), 'w').close()
+        # Mark as finished and exit
+        open(output_file, 'w').close()
         return
+
+    logging.info("# Removing nontarget reads.")
 
     # output directories
     tophat_dir = os.path.join(shared_build_dir, sample_id,
@@ -1231,14 +1240,16 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
            r'\2', r'\4')
 def filter_genomic_reads(input_file, output_file, sample_id, read_num):
     # We only need to map once for each mated pair
-    if read_num != "R1":
+    if read_num == "R2":
         # Wait for R1 task to finish processing and then mark as finished
-        while not os.path.exists(output_file):
+        while not os.path.exists(output_file.replace("R2", "R1")):
             time.sleep(120)
 
-        # Mark as finished an dexit
-        open(output_file.replace("R1", "R2"), 'w').close()
+        # Mark as finished and exit
+        open(output_file, 'w').close()
         return
+
+    logging.info("# Removing genomic reads.")
 
     # output directories
     tophat_dir = os.path.join(shared_build_dir, sample_id,
