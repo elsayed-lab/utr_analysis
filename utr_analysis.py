@@ -65,7 +65,7 @@ def parse_input():
     Usage Example:
     --------------
     ./utr_analysis.py                                               \\
-        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq"            \\
+        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"            \\
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \\
         -f1 TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
         -f2 mm10.fasta                                              \\
@@ -82,7 +82,7 @@ def parse_input():
 
     # Add arguments
     parser.add_argument('-i', '--input-reads', required=True,
-                        help='RNA-Seq FASTQ glob string')
+                        help='RNA-Seq FASTQ or gzipped FASTQ glob string')
     parser.add_argument('-d', '--build-directory', required=True,
                         help='Directory to save output to')
     parser.add_argument('-f1', '--target-genome', dest='target_genome',
@@ -222,10 +222,16 @@ def create_header_comment(filename, description, author, email):
     return template % (filename, author, email, datetime.datetime.utcnow(),
                        desc_processed, command)
 
-def run_command(cmd, log_handle):
+def run_command(cmd, log_handle, wait=True):
     """Runs a command and logs the output to a specified log handle"""
-    log_handle.info(cmd)
+    log_handle.info("# " + cmd)
 
+    # asynchronous
+    if wait is False:
+        process = subprocess.Popen(cmd.split(" "))
+        return 0
+
+    # synchronous
     process = subprocess.Popen(cmd.split(" "),
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
@@ -247,7 +253,12 @@ def sort_and_index(base_output, log_handle):
 
     # index bam
     index_cmd = 'samtools index %s' % (base_output + '_sorted.bam')
-    run_command(index_cmd, log_handle)
+
+    # 2014/04/01
+    # samtools index sometimes gets stuck during execution, even after the
+    # indexing has finished; since it isn't necessary for downstream processes
+    # the indexing will be done asynchronously for now.
+    run_command(index_cmd, log_handle, wait=False)
     log_handle.info("# Done sorting and indexing")
 
 #def add_sam_header(filepath, description, author, email, cmd):
@@ -495,14 +506,14 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     output_base = '%s/%s/fastq/unfiltered/%s_%s_%s' % (
         build_dir, sample_id, sample_id, read_num, read_num[-1]
     )
-    output_untrimmed = "%s_%s_untrimmed.fastq" % (output_base, feature_name)
-    output_trimmed = "%s_%s_trimmed.fastq" % (output_base, feature_name)
+    output_untrimmed = "%s_%s_untrimmed.fastq.gz" % (output_base, feature_name)
+    output_trimmed = "%s_%s_trimmed.fastq.gz" % (output_base, feature_name)
 
     # mated reads
     read_num_other = "R1" if read_num == "R2" else "R2"
     input_file_mated = input_file.replace("." + read_num[-1],
                                           "." + read_num_other[-1])
-    output_mated_reads = "%s_%s.fastq" % (output_base[:-2], read_num_other)
+    output_mated_reads = "%s_%s.fastq.gz" % (output_base[:-2], read_num_other)
 
     # compile regex
     read_regex = re.compile(feature_regex)
@@ -1200,7 +1211,7 @@ def check_genome_fastas():
 @follows(check_for_bowtie_indices)
 @follows(check_genome_fastas)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
@@ -1252,7 +1263,7 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
 #-----------------------------------------------------------------------------
 @follows(filter_nontarget_reads)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.filter_genomic_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_genomic_reads(input_file, output_file, sample_id, read_num):
@@ -1394,7 +1405,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_sl_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
            r'\2', r'\4')
 def find_polya_reads(input_file, output_file, sample_id, read_num):
@@ -1449,7 +1460,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_polya_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq'),
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
            r'\2', r'\4')
 def find_polyt_reads(input_file, output_file, sample_id, read_num):
