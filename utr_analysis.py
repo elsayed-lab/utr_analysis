@@ -96,11 +96,12 @@ def parse_input():
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
                         required=True, help='Spliced leader DNA sequence', 
                         default=None)
-    parser.add_argument('-e', '--exclude-internal-matches',
-                        help=('Only allow matches with the feature at the '
-                              'expected end of a read (upstream for SL and'
-                              'downstream for Poly-A tail)'),
-                        action='store_true')
+    parser.add_argument('-es', '--exclude-internal-sl-matches',
+                        help=('Only allow matches with the SL at the upstream'
+                              'end of a read.'), action='store_true')
+    parser.add_argument('-ep', '--exclude-internal-polya-matches',
+                        help=('Only allow matches with the Poly(A) tail at the'
+                              'downstream end of a read.'), action='store_true')
     parser.add_argument('-m', '--min-sl-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-p', '--min-polya-length', default=10, type=int,
@@ -423,7 +424,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
 
         log_handle.info(
             "# Ignoring %d reads which mapped to specified genome (%d total)" %
-            (num_reads_toal - num_unmapped, num_unmapped)
+            (num_reads_total - num_unmapped, num_unmapped)
         )
     else:
         log_handle.info("# Skipping %s: output already exists" % tophat_dir)
@@ -737,8 +738,10 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
     # Get coordinate and strand for each read in bam file
     for read in sam:
-        # if we have already counted the read, stop here
-        if read.qname in read_ids:
+        # Get read where feature sequence was found
+        #if read.qname in read_ids:
+        if ((read.is_read1 and read_num == 'R2') or 
+            (read.is_read2 and read_num == 'R1')):
             continue
         read_ids.append(read.qname)
 
@@ -959,7 +962,7 @@ sl_build_dir = os.path.join(
     args.build_directory,
     'spliced_leader',
     'minlength-%d' % args.min_sl_length,
-    'anchored' if args.exclude_internal_matches else 'unanchored'
+    'anchored' if args.exclude_internal_sl_matches else 'unanchored'
 )
 
 # Poly(A) tail sub-directory
@@ -967,7 +970,7 @@ polya_build_dir = os.path.join(
     args.build_directory,
     'poly-a',
     'minlength-%d' % args.min_polya_length,
-    'anchored' if args.exclude_internal_matches else 'unanchored'
+    'anchored' if args.exclude_internal_polya_matches else 'unanchored'
 )
 
 # Poly(A) tail reverse complement sub-directory
@@ -975,7 +978,7 @@ polyt_build_dir = os.path.join(
     args.build_directory,
     'poly-t',
     'minlength-%d' % args.min_polya_length,
-    'anchored' if args.exclude_internal_matches else 'unanchored'
+    'anchored' if args.exclude_internal_polya_matches else 'unanchored'
 )
 
 # Get a list of sample ids ids
@@ -1337,7 +1340,7 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
     sl_filter = args.spliced_leader[-args.min_sl_length:]
 
     # Determine strings to match in reads
-    if args.exclude_internal_matches:
+    if args.exclude_internal_sl_matches:
         sl_regex = '|'.join(
             ["^" + args.spliced_leader[-x:] for x in 
              range(args.min_sl_length, len(args.spliced_leader) + 1)]
@@ -1412,7 +1415,7 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
     polya_filter = 'A' * args.min_polya_length
 
-    if args.exclude_internal_matches:
+    if args.exclude_internal_polya_matches:
         polya_regex = 'A{%d,}$' % (args.min_polya_length)
     else:
         polya_regex = 'A{%d,}' % (args.min_polya_length)
@@ -1468,8 +1471,8 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
     # Match reads with at least n T's at the beginning of the read; For now 
     # we will always require matches to be at the beginning of the read.
     polyt_filter = 'T' * args.min_polya_length
-    if args.exclude_internal_matches:
-        polyt_regex = 'T{%d,}$' % (args.min_polya_length)
+    if args.exclude_internal_polya_matches:
+        polyt_regex = '^T{%d,}' % (args.min_polya_length)
     else:
         polyt_regex = 'T{%d,}' % (args.min_polya_length)
 
