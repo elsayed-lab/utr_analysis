@@ -945,6 +945,61 @@ def output_coordinates(results, feature_name, filepath):
                 ])
     fp.close()
 
+def combine_gff_results(input_gffs, outfile, feature_name):
+    """Combines GFF output generated for each individual sample into a single
+    combined file."""
+    # Create a dictionary to keep track of the coordinates.
+    results = {}
+
+    # GFF entry fields
+    gff_fields = ['chromosome', 'script', 'feature', 'start', 'stop', 'count', 
+                  'strand', 'quality', 'description']
+
+    # Parse individual GFFs and create a new summary GFF
+    for gff in input_gffs:
+        # Open GFF and skip first few lines (comments)
+        fp = open(gff)
+        fp.readline()
+        fp.readline()
+        fp.readline()
+
+        # Parse with CSV reader
+        reader = csv.DictReader(fp, delimiter='\t', fieldnames=gff_fields)
+
+        for row in reader:
+            # Chromosome
+            chromosome = row['chromosome']
+            acceptor_site = row['start']
+            count = int(row['count'])
+            strand = row['strand']
+
+            # Parse GFF attributes field
+            # Example: ID=LmjF.31.ncRNA1.sl.8;Name=LmjF.31.001;description=unspecified
+            parts = row['description'].split(';')
+
+            # Parse gene name and description from attributes
+            gene = parts[1][5:]
+            description = parts[-1]
+
+            # Add to output dictionary
+            if not chromosome in results:
+                results[chromosome] = {}
+            if not gene in results[chromosome]:
+                results[chromosome][gene] = {}
+
+            # Increment site count and save distance from gene
+            if not acceptor_site in results[chromosome][gene]:
+                results[chromosome][gene][acceptor_site] = {
+                    "count": count,
+                    "strand": strand,
+                    "description": description
+                }
+            else:
+                results[chromosome][gene][acceptor_site]['count'] += count
+
+    # Save summary GFF
+    output_coordinates(results, feature_name, outfile)
+
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -954,6 +1009,11 @@ args = parse_input()
 
 # Shared directory
 shared_build_dir = os.path.join(args.build_directory, 'common')
+
+# Combined output directory
+combined_output_dir = os.path.join(args.build_directory, 'results')
+if not os.path.exists(combined_output_dir):
+    os.makedirs(combined_output_dir, mode=0o755)
 
 # Create a unique build paths for specified parameters
 
@@ -1020,7 +1080,7 @@ for sample_id in sample_ids:
 
     # parameter- and feature-specific directories
     for base_dir in [sl_build_dir, polya_build_dir, polyt_build_dir]:
-        for sub_dir in ['fastq/filtered', 'fastq/unfiltered', 'ruffus', 
+        for sub_dir in ['fastq/filtered', 'fastq/unfiltered',
                         'results', 'log', 'tophat']:
             outdir = os.path.join(base_dir, sample_id, sub_dir)
             if not os.path.exists(outdir):
@@ -1387,9 +1447,6 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
 # steps are based to ensure that the putative acceptor sites lie in acceptable
 # locations (e.g. not inside a CDS.)
 #-----------------------------------------------------------------------------
-#@collate(map_polyt_reads,
-#       regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
-#       r'\1/\2_.compute_sl_coordinates')
 @transform(map_sl_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
            r'\1/\2_\3.compute_sl_coordinates',
@@ -1398,6 +1455,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped trans-splicing events")
     compute_coordinates('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
+
 
 #-----------------------------------------------------------------------------
 # Poly(A) Analysis
@@ -1409,7 +1467,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 @follows(compute_sl_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
+           r'%s/\2/ruffus/\2_\4.find_polya_reads' % shared_build_dir,
            r'\2', r'\4')
 def find_polya_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
@@ -1464,7 +1522,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 @follows(compute_polya_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
+           r'%s/\2/ruffus/\2_\4.find_polyt_reads' % shared_build_dir,
            r'\2', r'\4')
 def find_polyt_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(T) tail fragment"""
@@ -1510,26 +1568,60 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
     compute_coordinates('polyt', polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
+#-----------------------------------------------------------------------------
+# Step 6: Combine coordinate output for multiple samples 
 #
-# Combine results
+# Next, we create a single GFF file using the information contained in the GFF
+# files that were constructed for each sample.
 #
-@collate(compute_polyt_coordinates,
-         regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).compute_polyt_coordinates'),
-         r'\1/all.combine_results')
+# Coordinates with low coverage may also be filtered out at this step.
+#-----------------------------------------------------------------------------
+@merge(compute_polyt_coordinates, '%s/finished' % combined_output_dir)
 def combine_results(input_files, output_file):
-    logging.info(
-        "# Combining results and filtering out sites with low support")
-    # TEST
-    print("INPUT FILES:")
-    print(input_files)
-    open(output_file, 'w').close()
+    # Convert input ruffus tasks to corresponding GFF filepaths
+    regex = '.*/(HPGL[0-9]+)_(R[1-2]).*'
+
+    # Combine spliced leader output
+    logging.info("# Combining spliced leader coordinate output and filtering "
+                 "out sites with low support")
+
+    sl_gffs = []
+    for infile in input_files:
+        (sample_id, read_num) = re.match(regex, infile).groups()
+        gff = "%s/%s/results/sl_coordinates_%s.gff" % (
+                 sl_build_dir, sample_id, read_num)
+        sl_gffs.append(gff)
+
+    sl_outfile = os.path.join(combined_output_dir, 'spliced_leader.gff')
+    combine_gff_results(sl_gffs, sl_outfile, 'sl')
+
+    # Combine Poly(A) output
+    logging.info("# Combining Poly(A) coordinate output and filtering "
+                 "out sites with low support")
+
+    polya_gffs = []
+    for infile in input_files:
+        (sample_id, read_num) = re.match(regex, infile).groups()
+        # Poly(A)
+        gff1 = "%s/%s/results/polya_coordinates_%s.gff" % (
+                 polya_build_dir, sample_id, read_num)
+        polya_gffs.append(gff1)
+
+        # Poly(T)
+        gff2 = "%s/%s/results/polyt_coordinates_%s.gff" % (
+                 polyt_build_dir, sample_id, read_num)
+        polya_gffs.append(gff2)
+
+    polya_outfile = os.path.join(combined_output_dir, 'polya.gff')
+    combine_gff_results(polya_gffs, polya_outfile, 'polya')
+
 
 #-----------------------------------------------------------------------------
 # Run pipeline
 #-----------------------------------------------------------------------------
 if __name__ == "__main__":
-    pipeline_run([compute_polyt_coordinates], logger=logging.getLogger(''),
-                 multiprocess=args.num_threads)
+    pipeline_run([combine_results], forcedtorun_tasks=[combine_results],
+                 logger=logging.getLogger(''), multiprocess=args.num_threads)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
-                            [compute_polyt_coordinates])
+                            [combine_results])
 
