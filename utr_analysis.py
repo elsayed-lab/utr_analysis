@@ -252,6 +252,9 @@ def sort_and_index(base_output, log_handle):
         base_output + ".bam", base_output + "_sorted")
     run_command(sort_cmd, log_handle)
 
+    # delete unsorted verion
+    os.remove(base_output + ".bam")
+
     # index bam
     index_cmd = 'samtools index %s' % (base_output + '_sorted.bam')
 
@@ -688,6 +691,11 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     # Load existing gene annotations
     annotations_fp = open(args.gff)
 
+    # If processing Poly(A)/Poly(T), load genome sequence as well
+    if feature_name != 'sl':
+        genome = SeqIO.parse(args.target_genome, 'fasta')
+        chr_sequences = {x.id:x for x in genome}
+
     # Get chromosomes from GFF file
     chromosomes = {}
 
@@ -717,6 +725,23 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     input_bam = '%s/%s/tophat/%s_filtered_trimmed/accepted_hits_sorted.bam' % (
         build_dir, sample_id, read_num
     )
+
+    # For Poly(A) analysis, we will also load the untrimmed version to
+    # determine original read length
+    if feature_name != 'sl':
+        input_bam_untrimmed = '%s/%s/tophat/mapped_to_target_untrimmed/unmapped_sorted.bam' % (
+            shared_build_dir, sample_id
+        )
+        sam_untrimmed = pysam.Samfile(input_bam_untrimmed, 'rb')
+
+        read_lengths = {}
+
+        for read in sam_untrimmed:
+            read_num = 'R1' if read.is_read1 else 'R2'
+            if not read.qname in read_lengths:
+                read_lengths[read.qname] = {read_num:read.rlen}
+            else:
+                read_lengths[read.qname][read_num] = read.rlen
 
     # file to save results for individual sample
     sample_csv_writer = csv.writer(
@@ -755,6 +780,16 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             inside_cds.writerow([read.qname, chromosome, strand, read.pos])
             num_inside_cds = num_inside_cds + 1
             continue
+
+        # For Poly(A)/Poly(T) reads, check to see if reads contain at least 1
+        # more A/T at the end of read compared with location mapped in genome
+        if feature_name != "sl":
+            # Number of A's or T's
+            feature_length = read_lengths[read.qname][read_num] - read.rlen
+
+            # Count number of A's / T's just downstream of acceptor site
+            
+
 
         # Find nearest gene
         gene = find_closest_gene(chromosomes[chromosome], strand, read.pos)
