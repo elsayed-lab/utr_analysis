@@ -111,10 +111,6 @@ def parse_input():
                               'scan for related genes (default=10000)'))
     parser.add_argument('--num-threads', default=4, type=int,
                         help='Number of threads to use.')
-    parser.add_argument('--author', help='Author contact name', 
-                        default='')
-    parser.add_argument('--email', help='Author contact email address',
-                        default='')
 
     # Parse arguments
     args = parser.parse_args()
@@ -126,10 +122,6 @@ def parse_input():
 
     if args.nontarget_genome:
         args.nontarget_genome = os.path.expandvars(args.nontarget_genome)
-
-    # set defaults for author if none is specified
-    if args.author is "":
-        args.author = os.getlogin()
 
     # @TODO Validate input
     return args
@@ -190,39 +182,6 @@ def readfq(fp):
                 yield name, seq, None # yield a fasta record instead
                 break
 
-def create_header_comment(filename, description, author, email):
-    """
-    Creates a header comment to be appended at the top of the output files
-    generated at various stages in the pipeline.
-    """
-    template=textwrap.dedent("""
-    ###########################################################
-    # File:   %s
-    # Author: %s
-    # Email:  %s
-    # Date:   %s UT
-    #
-    # Description:
-    #
-    # %s
-    #
-    # Command used to generate file:%s
-    #
-    ###########################################################
-    """).lstrip()
-
-    # format description
-    desc_raw = " ".join(description.split())
-    desc_processed = "\n# ".join(textwrap.wrap(desc_raw, 78))
-
-    # format command
-    command_parts = textwrap.wrap(" ".join(sys.argv), 75)
-    command_parts = [x.ljust(75) + " \\" for x in command_parts]
-    command = "\n# ".join(["\n#"] + command_parts)
-
-    return template % (filename, author, email, datetime.datetime.utcnow(),
-                       desc_processed, command)
-
 def run_command(cmd, log_handle, wait=True):
     """Runs a command and logs the output to a specified log handle"""
     log_handle.info("# " + cmd)
@@ -264,30 +223,6 @@ def sort_and_index(base_output, log_handle):
     # the indexing will be done asynchronously for now.
     run_command(index_cmd, log_handle, wait=False)
     log_handle.info("# Done sorting and indexing")
-
-#def add_sam_header(filepath, description, author, email, cmd):
-    #"""Adds a header to a sam file including some information about how the
-    #file was generated, along with some other basic information."""
-    #template=textwrap.dedent(""" 
-    #@CO File:   %s
-    #@CO Author: %s
-    #@CO Email:  %s
-    #@CO Date:   %s UT
-    #@CO Description: %s
-    #""").lstrip()
-
-    ## format description
-    #desc_raw = " ".join(description.split())
-    #desc_processed = "\n@CO ".join(textwrap.wrap(desc_raw, 78))
-
-    ## format command
-    #command_parts = textwrap.wrap(cmd, 75)
-    #command_parts = [x.ljust(75) + " \\" for x in command_parts]
-    #command = "\n@CO ".join(["\n@CO"] + command_parts)
-
-    #return template % (filename, author, email, datetime.datetime.utcnow(),
-                       #desc_processed, command)
-
 
 def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1, 
                max_multihits=20, extra_args=""):
