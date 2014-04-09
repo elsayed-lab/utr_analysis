@@ -728,7 +728,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
     # For Poly(A) analysis, we will also load the untrimmed version to
     # determine original read length
-    if feature_name != 'sl':
+    if feature_name in ['polya', 'polyt']:
         input_bam_untrimmed = '%s/%s/tophat/mapped_to_target_untrimmed/unmapped_sorted.bam' % (
             shared_build_dir, sample_id
         )
@@ -737,11 +737,11 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         read_lengths = {}
 
         for read in sam_untrimmed:
-            read_num = 'R1' if read.is_read1 else 'R2'
+            rnum = 'R1' if read.is_read1 else 'R2'
             if not read.qname in read_lengths:
-                read_lengths[read.qname] = {read_num:read.rlen}
+                read_lengths[read.qname] = {rnum:read.rlen}
             else:
-                read_lengths[read.qname][read_num] = read.rlen
+                read_lengths[read.qname][rnum] = read.rlen
 
     # file to save results for individual sample
     sample_csv_writer = csv.writer(
@@ -774,30 +774,55 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         chromosome = sam.getrname(read.tid)
         strand = "-" if read.is_reverse else "+"
 
+        # SL/Poly(A) acceptor site location
+        if ((strand == '+' and feature_name == 'polya') or 
+            (strand == '-' and feature_name == 'polyt') or
+            (strand == '-' and feature_name == 'sl'):
+            # acceptor site at right end of read
+            acceptor_site = read.pos + read.rlen
+        else:
+            # acceptor site at left end of read
+            acceptor_site = read.pos
+
         # First, check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
-        if is_inside_cds(chromosomes[chromosome], read.pos):
-            inside_cds.writerow([read.qname, chromosome, strand, read.pos])
+        if is_inside_cds(chromosomes[chromosome], acceptor_site):
+            inside_cds.writerow([read.qname, chromosome, strand, acceptor_site])
             num_inside_cds = num_inside_cds + 1
             continue
 
         # For Poly(A)/Poly(T) reads, check to see if reads contain at least 1
         # more A/T at the end of read compared with location mapped in genome
-        if feature_name != "sl":
+        if feature_name in ['polya', 'polyt']:
             # Number of A's or T's
             feature_length = read_lengths[read.qname][read_num] - read.rlen
 
             # Count number of A's / T's just downstream of acceptor site
-            
+            if ((feature_name == 'polya' and strand == '+') or 
+                (feature_name == 'polyt' and strand == '-')):
+                # Check for A's at right end of read
+                seq = chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length]
 
+                # Make sure that read contained at least one more A than is
+                # found in the genome at mapped location
+                if seq.count('A') >= feature_length:
+                    continue
+            else:
+                # Check for T's at right end of read
+                seq = chr_sequences[chromosome][read.pos - feature_length:read.pos]
+
+                # Make sure that read contained at least one more A than is
+                # found in the genome at mapped location
+                if seq.count('T') >= feature_length:
+                    continue
 
         # Find nearest gene
-        gene = find_closest_gene(chromosomes[chromosome], strand, read.pos)
+        gene = find_closest_gene(chromosomes[chromosome], strand, acceptor_site)
 
         # If no nearby genes were found, stop here
         if gene is None:
             no_nearby_genes.writerow(
-                [read.qname, chromosome, strand, read.pos])
+                [read.qname, chromosome, strand, acceptor_site])
             num_no_nearby_genes = num_no_nearby_genes + 1
             continue
 
@@ -811,20 +836,20 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         # Add entry to sample output csv
         sample_csv_writer.writerow([
-            read.qname, gene['id'], chromosome, strand, read.pos,
+            read.qname, gene['id'], chromosome, strand, acceptor_site,
             gene['distance']
         ])
 
         # Increment site count and save distance from gene
-        if not read.pos in results[chromosome][gene['id']]:
-            results[chromosome][gene['id']][read.pos] = {
+        if not acceptor_site in results[chromosome][gene['id']]:
+            results[chromosome][gene['id']][acceptor_site] = {
                 "count": 1,
                 "distance": gene['distance'],
                 "strand": strand,
                 "description": gene['description']
             }
         else:
-            results[chromosome][gene['id']][read.pos]['count'] += 1
+            results[chromosome][gene['id']][acceptor_site]['count'] += 1
 
     # record number of good and bad reads
     loggers[sample_id][feature_name][read_num].info(
