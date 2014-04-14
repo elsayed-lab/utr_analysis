@@ -43,7 +43,7 @@ import StringIO
 import textwrap
 import subprocess
 from ruffus import *
-from Bio import Seq
+from Bio import Seq,SeqIO
 from BCBio import GFF
 
 #--------------------------------------
@@ -627,6 +627,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     annotations_fp = open(args.gff)
 
     # If processing Poly(A)/Poly(T), load genome sequence as well
+    # This will be used to make sure number of A's or T's in read exceeds
+    # the number found at the mapped location in the genome.
     if feature_name != 'sl':
         genome = SeqIO.parse(args.target_genome, 'fasta')
         chr_sequences = {x.id:x for x in genome}
@@ -712,7 +714,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # SL/Poly(A) acceptor site location
         if ((strand == '+' and feature_name == 'polya') or 
             (strand == '-' and feature_name == 'polyt') or
-            (strand == '-' and feature_name == 'sl'):
+            (strand == '-' and feature_name == 'sl')):
             # acceptor site at right end of read
             acceptor_site = read.pos + read.rlen
         else:
@@ -736,19 +738,19 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             if ((feature_name == 'polya' and strand == '+') or 
                 (feature_name == 'polyt' and strand == '-')):
                 # Check for A's at right end of read
-                seq = chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length]
+                rec = chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length]
 
                 # Make sure that read contained at least one more A than is
                 # found in the genome at mapped location
-                if seq.count('A') >= feature_length:
+                if rec.seq.count('A') >= feature_length:
                     continue
             else:
                 # Check for T's at right end of read
-                seq = chr_sequences[chromosome][read.pos - feature_length:read.pos]
+                rec = chr_sequences[chromosome][read.pos - feature_length:read.pos]
 
                 # Make sure that read contained at least one more A than is
                 # found in the genome at mapped location
-                if seq.count('T') >= feature_length:
+                if rec.seq.count('T') >= feature_length:
                     continue
 
         # Find nearest gene
@@ -1006,7 +1008,12 @@ args = parse_input()
 shared_build_dir = os.path.join(args.build_directory, 'common')
 
 # Combined output directory
-combined_output_dir = os.path.join(args.build_directory, 'results')
+combined_output_dir = os.path.join(
+    args.build_directory,
+    'results',
+    'minlength-%d' % args.min_sl_length,
+    'anchored' if args.exclude_internal_sl_matches else 'unanchored'
+)
 if not os.path.exists(combined_output_dir):
     os.makedirs(combined_output_dir, mode=0o755)
 
@@ -1384,7 +1391,7 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
 #-----------------------------------------------------------------------------
 @transform(filter_genomic_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).filter_genomic_reads'),
-           r'\1/\2_\3.find_sl_reads',
+           r'%s/\2/ruffus/\2_\3.find_sl_reads' % sl_build_dir,
            r'\2', r'\3')
 def find_sl_reads(input_file, output_file, sample_id, read_num):
     """
@@ -1462,7 +1469,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 @follows(compute_sl_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.find_polya_reads' % shared_build_dir,
+           r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
            r'\2', r'\4')
 def find_polya_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
@@ -1517,7 +1524,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 @follows(compute_polya_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.find_polyt_reads' % shared_build_dir,
+           r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
            r'\2', r'\4')
 def find_polyt_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(T) tail fragment"""
