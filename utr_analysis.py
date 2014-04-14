@@ -663,36 +663,37 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         build_dir, sample_id, read_num
     )
 
-    # For Poly(A) analysis, we will also load the untrimmed version to
-    # determine original read length
-    if feature_name in ['polya', 'polyt']:
-        input_bam_untrimmed = '%s/%s/tophat/mapped_to_target_untrimmed/unmapped_sorted.bam' % (
-            shared_build_dir, sample_id
-        )
-        sam_untrimmed = pysam.Samfile(input_bam_untrimmed, 'rb')
+    # Load the untrimmed reads in order to to determine original read lengths
+    input_bam_untrimmed = '%s/%s/tophat/mapped_to_target_untrimmed/unmapped_sorted.bam' % (
+        shared_build_dir, sample_id
+    )
+    sam_untrimmed = pysam.Samfile(input_bam_untrimmed, 'rb')
 
-        read_lengths = {}
+    untrimmed_reads = {}
 
-        for read in sam_untrimmed:
-            rnum = 'R1' if read.is_read1 else 'R2'
-            if not read.qname in read_lengths:
-                read_lengths[read.qname] = {rnum:read.rlen}
-            else:
-                read_lengths[read.qname][rnum] = read.rlen
+    for read in sam_untrimmed:
+        rnum = 'R1' if read.is_read1 else 'R2'
+        if not read.qname in untrimmed_reads:
+            untrimmed_reads[read.qname] = {rnum:read}
+        else:
+            untrimmed_reads[read.qname][rnum] = read
 
-    # file to save results for individual sample
+    # In addition to saving the coordinates as a GFF file, we will also write a
+    # CSV file which contains entries for each read used. This can be useful
+    # for debugging/tracking down the origin of a particular coordinate.
     sample_csv_writer = csv.writer(
         open('%s/matched_reads_%s.csv' % (output_dir, read_num), 'w')
     )
     sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
-                                'strand', 'position', 'distance'])
+                                'strand', 'trimmed_start', 'trimmed_stop',
+                                'acceptor_site'])
 
     # keep track of how many reads were found in the expected location
     num_good = 0
     num_no_nearby_genes = 0
     num_inside_cds = 0
 
-    # open sam file
+    # open trimmed reads sam file
     sam = pysam.Samfile(input_bam, 'rb')
 
     # Keep track of read id so we only count each one once
@@ -728,12 +729,13 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             num_inside_cds = num_inside_cds + 1
             continue
 
+        # Length of matched SL suffix or number of A's/T's
+        untrimmed_read = untrimmed_reads[read.qname][read_num]
+        feature_length = untrimmed_read.rlen - read.rlen
+
         # For Poly(A)/Poly(T) reads, check to see if reads contain at least 1
         # more A/T at the end of read compared with location mapped in genome
         if feature_name in ['polya', 'polyt']:
-            # Number of A's or T's
-            feature_length = read_lengths[read.qname][read_num] - read.rlen
-
             # Count number of A's / T's just downstream of acceptor site
             if ((feature_name == 'polya' and strand == '+') or 
                 (feature_name == 'polyt' and strand == '-')):
@@ -743,6 +745,9 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 # Make sure that read contained at least one more A than is
                 # found in the genome at mapped location
                 if rec.seq.count('A') >= feature_length:
+                    # TESTING
+                    logging.info("Skipping read with similar number of A's in genome: %s" %
+                                 read.qname)
                     continue
             else:
                 # Check for T's at right end of read
@@ -751,6 +756,9 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 # Make sure that read contained at least one more A than is
                 # found in the genome at mapped location
                 if rec.seq.count('T') >= feature_length:
+                    # TESTING
+                    logging.info("Skipping read with similar number of T's in genome: %s" %
+                                 read.qname)
                     continue
 
         # Find nearest gene
@@ -773,8 +781,10 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         # Add entry to sample output csv
         sample_csv_writer.writerow([
-            read.qname, gene['id'], chromosome, strand, acceptor_site,
-            gene['distance']
+            read.qname, gene['id'], chromosome, strand,
+            read.pos, read.pos + read.rlen,
+            untrimmed_read.pos, untrimmed_read.pos + untrimmed_read.rlen,
+            acceptor_site
         ])
 
         # Increment site count and save distance from gene
@@ -1083,7 +1093,7 @@ for sample_id in sample_ids:
     # parameter- and feature-specific directories
     for base_dir in [sl_build_dir, polya_build_dir, polyt_build_dir]:
         for sub_dir in ['fastq/filtered', 'fastq/unfiltered',
-                        'results', 'log', 'tophat']:
+                        'results', 'ruffus', 'log', 'tophat']:
             outdir = os.path.join(base_dir, sample_id, sub_dir)
             if not os.path.exists(outdir):
                 os.makedirs(outdir, mode=0o755)
