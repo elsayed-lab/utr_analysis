@@ -568,7 +568,11 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     log.info("# Finished processing %s" % os.path.basename(input_file))
 
 def map_reads(feature_name, build_dir, sample_id, read_num):
-    """Maps the filtered reads back to the genome"""
+    """
+    Maps the filtered reads back to the genome. If the trimmed version of
+    the read successfully maps this is indicative of a possible trans-spliced
+    or polyadenylated read.
+    """
     output_dir = '%s/%s/tophat/%s_filtered_trimmed' % (
         build_dir, sample_id, read_num
     )
@@ -623,8 +627,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     * http://biopython.org/wiki/GFF_Parsing
     * http://biopython.org/DIST/docs/api/Bio.SeqFeature.SeqFeature-class.html
     """
-    # Load existing gene annotations
-    annotations_fp = open(args.gff)
+    # output directory
+    output_dir = '%s/%s/results' % (build_dir, sample_id)
 
     # If processing Poly(A)/Poly(T), load genome sequence as well
     # This will be used to make sure number of A's or T's in read exceeds
@@ -636,8 +640,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     # Get chromosomes from GFF file
     chromosomes = {}
 
-    # output directory
-    output_dir = '%s/%s/results' % (build_dir, sample_id)
+    # Load existing gene annotations
+    annotations_fp = open(args.gff)
 
     for entry in GFF.parse(annotations_fp):
         if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
@@ -645,6 +649,11 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
     # Create a dictionary to keep track of the coordinates.
     results = {}
+
+    # keep track of how many reads were found in the expected location
+    num_good = 0
+    num_no_nearby_genes = 0
+    num_inside_cds = 0
 
     # Create output CSV writer for hits that are not near any genes
     no_nearby_genes = csv.writer(
@@ -658,10 +667,15 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     )
     inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
 
-    # Bam input
-    input_bam = '%s/%s/tophat/%s_filtered_trimmed/accepted_hits_sorted.bam' % (
-        build_dir, sample_id, read_num
+    # In addition to saving the coordinates as a GFF file, we will also write a
+    # CSV file which contains entries for each read used. This can be useful
+    # for debugging/tracking down the origin of a particular coordinate.
+    sample_csv_writer = csv.writer(
+        open('%s/matched_reads_%s.csv' % (output_dir, read_num), 'w')
     )
+    sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
+                                'strand', 'trimmed_start', 'trimmed_stop',
+                                'acceptor_site'])
 
     # Load the untrimmed reads in order to to determine original read lengths
     input_bam_untrimmed = '%s/%s/tophat/mapped_to_target_untrimmed/unmapped_sorted.bam' % (
@@ -678,35 +692,18 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         else:
             untrimmed_reads[read.qname][rnum] = read
 
-    # In addition to saving the coordinates as a GFF file, we will also write a
-    # CSV file which contains entries for each read used. This can be useful
-    # for debugging/tracking down the origin of a particular coordinate.
-    sample_csv_writer = csv.writer(
-        open('%s/matched_reads_%s.csv' % (output_dir, read_num), 'w')
-    )
-    sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
-                                'strand', 'trimmed_start', 'trimmed_stop',
-                                'acceptor_site'])
-
-    # keep track of how many reads were found in the expected location
-    num_good = 0
-    num_no_nearby_genes = 0
-    num_inside_cds = 0
-
     # open trimmed reads sam file
+    input_bam = '%s/%s/tophat/%s_filtered_trimmed/accepted_hits_sorted.bam' % (
+        build_dir, sample_id, read_num
+    )
     sam = pysam.Samfile(input_bam, 'rb')
-
-    # Keep track of read id so we only count each one once
-    read_ids = []
 
     # Get coordinate and strand for each read in bam file
     for read in sam:
         # Get read where feature sequence was found
-        #if read.qname in read_ids:
         if ((read.is_read1 and read_num == 'R2') or 
             (read.is_read2 and read_num == 'R1')):
             continue
-        read_ids.append(read.qname)
 
         # Chromosome and strand where the read was mapped
         chromosome = sam.getrname(read.tid)
@@ -733,21 +730,24 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         untrimmed_read = untrimmed_reads[read.qname][read_num]
         feature_length = untrimmed_read.rlen - read.rlen
 
-        # For Poly(A)/Poly(T) reads, check to see if reads contain at least 1
-        # more A/T at the end of read compared with location mapped in genome
         if feature_name in ['polya', 'polyt']:
             # Count number of A's / T's just downstream of acceptor site
             if ((feature_name == 'polya' and strand == '+') or 
                 (feature_name == 'polyt' and strand == '-')):
                 # Check for A's at right end of read
+                # This is what we expect for either positive-strand Poly(A)
+                # reads, and also Poly(T) reads on the negative strand
+                # (original read has T's at front, but maps to location with
+                # A's at the end).
+                #
+                # The sequence record generated will contain the same number of
+                # bases as the matched feature fragment since that is all that
+                # is needed for this check.
                 rec = chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length]
 
                 # Make sure that read contained at least one more A than is
                 # found in the genome at mapped location
                 if rec.seq.count('A') >= feature_length:
-                    # TESTING
-                    logging.info("Skipping read with similar number of A's in genome: %s" %
-                                 read.qname)
                     continue
             else:
                 # Check for T's at right end of read
@@ -756,9 +756,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 # Make sure that read contained at least one more A than is
                 # found in the genome at mapped location
                 if rec.seq.count('T') >= feature_length:
-                    # TESTING
-                    logging.info("Skipping read with similar number of T's in genome: %s" %
-                                 read.qname)
                     continue
 
         # Find nearest gene
@@ -1520,7 +1517,7 @@ def map_polya_reads(input_file, output_file, sample_id, read_num):
            r'\2', r'\3')
 def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
-        "# Computing coordinates for mapped polyadenylation events [1/2]")
+        "# Computing coordinates for mapped polyadenylation events [A]")
     compute_coordinates('polya', polya_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
@@ -1576,7 +1573,7 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
            r'\2', r'\3')
 def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
-        "# Computing coordinates for mapped polyadenylation events [2/2]")
+        "# Computing coordinates for mapped polyadenylation events [T]")
     compute_coordinates('polyt', polyt_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
