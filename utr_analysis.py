@@ -745,17 +745,18 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 # is needed for this check.
                 rec = chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length]
 
-                # Make sure that read contained at least one more A than is
+                # Make sure that read contained at least three more A's than is
                 # found in the genome at mapped location
-                if rec.seq.count('A') >= feature_length:
+                # if rec.seq.count('A') >= feature_length:
+                if not feature_length >= rec.seq.count('A') + 3:
                     continue
             else:
                 # Check for T's at right end of read
                 rec = chr_sequences[chromosome][read.pos - feature_length:read.pos]
 
-                # Make sure that read contained at least one more A than is
+                # Make sure that read contained at least three more T's than is
                 # found in the genome at mapped location
-                if rec.seq.count('T') >= feature_length:
+                if not feature_length >= rec.seq.count('T') + 3:
                     continue
 
         # Find nearest gene
