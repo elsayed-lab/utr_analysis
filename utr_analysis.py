@@ -360,6 +360,9 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
         num_reads_total = num_lines(r1) / 4
         num_unmapped = num_lines(bam_input) / 2
 
+        # delete uneeded accepted_hits files
+        os.remove(os.path.join(tophat_dir, "accepted_hits_sorted.bam"))
+
         log_handle.info(
             "# Ignoring %d reads which mapped to specified genome (%d total)" %
             (num_reads_total - num_unmapped, num_unmapped)
@@ -745,18 +748,25 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 # is needed for this check.
                 rec = chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length]
 
-                # Make sure that read contained at least three more A's than is
+                # Make sure that read contained at least one more A than is
                 # found in the genome at mapped location
                 # if rec.seq.count('A') >= feature_length:
-                if not feature_length >= rec.seq.count('A') + 3:
+                #if not feature_length >= rec.seq.count('A') + 3:
+                #    continue
+                genomic_count = re.match("^A*", str(rec.seq)).end()
+                if not feature_length > genomic_count:
                     continue
+
             else:
                 # Check for T's at right end of read
                 rec = chr_sequences[chromosome][read.pos - feature_length:read.pos]
 
-                # Make sure that read contained at least three more T's than is
+                # Make sure that read contained at least one more T than is
                 # found in the genome at mapped location
-                if not feature_length >= rec.seq.count('T') + 3:
+                #if not feature_length >= rec.seq.count('T') + 3:
+                #    continue
+                genomic_count = re.match("^T*", str(rec.seq[::-1])).end()
+                if not feature_length > genomic_count:
                     continue
 
         # Find nearest gene
