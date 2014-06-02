@@ -3,5 +3,6 @@
 *.png
 .ruffus_history.sqlite
 build
+settings
 scripts/output
 igv_session.xml

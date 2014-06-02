@@ -82,7 +82,9 @@ def parse_input():
 
     # Add arguments
     parser.add_argument('-i', '--input-reads', required=True,
-                        help='RNA-Seq FASTQ or gzipped FASTQ glob string')
+                        help=('RNA-Seq FASTQ or gzipped FASTQ glob string or'
+                              'a txt file containing filepaths to the samples'
+                              'to be used'))
     parser.add_argument('-d', '--build-directory', required=True,
                         help='Directory to save output to')
     parser.add_argument('-f1', '--target-genome', dest='target_genome',
@@ -281,6 +283,7 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     # check to see if tophat succeeded and stop execution otherwise
     if ret != 0:
         log_handle.error("# Error running tophat (%s)!" % genome)
+        print("# Error running tophat (%s)!" % genome)
         sys.exit()
 
     # sort and index bam output using samtools
@@ -1066,8 +1069,9 @@ polyt_build_dir = os.path.join(
 input_regex = re.compile(r'.*(HPGL[0-9]+).*')
 sample_ids = []
 
-# currently processing
-for filename in glob.glob(args.input_reads):
+# Get samples to be parsed
+filenames = glob.glob(args.input_reads)
+for filename in filenames:
     sample_id = re.match(input_regex, filename).groups()[0]
     if sample_id not in sample_ids:
         sample_ids.append(sample_id)
