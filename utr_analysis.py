@@ -95,6 +95,11 @@ def parse_input():
                               'be filtered out prior to mapping. (optional)'))
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
                         help='Genome annotation GFF')
+    parser.add_argument('-u', '--gff-uorf-annotations', dest='uorf_gff',
+                        help=('GFF containing possible uORFs; generated during '
+                              'final steps of processing and can be passed '
+                              'back in to re-perform analyses treating these '
+                              'locations as putative ORFs.'))
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
                         required=True, help='Spliced leader DNA sequence', 
                         default=None)
@@ -644,14 +649,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         chr_sequences = {x.id:x for x in genome}
 
     # Get chromosomes from GFF file
-    chromosomes = {}
-
-    # Load existing gene annotations
-    annotations_fp = open(args.gff)
-
-    for entry in GFF.parse(annotations_fp):
-        if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
-            chromosomes[entry.id] = entry
+    chromosomes = load_annotations()
 
     # Create a dictionary to keep track of the coordinates.
     results = {}
@@ -937,6 +935,14 @@ def output_coordinates(results, feature_name, filepath):
     fp.write("##feature-ontology\tsofa.obo\n")
     fp.write("##attribute-ontology\tgff3_attributes.obo\n")
 
+    # Copy chromosome entries from primary GFF
+    annotations_fp = open(args.gff)
+
+    for line in annotations_fp:
+        if "\tchromosome\t" in line:
+            fp.write(line)
+    annotations_fp.close()
+
     # Write header to output
     writer = csv.writer(fp, delimiter='\t')
 
@@ -963,7 +969,57 @@ def output_coordinates(results, feature_name, filepath):
                 ])
     fp.close()
 
-def combine_gff_results(input_gffs, outfile, feature_name):
+def output_unannotated_orfs(results, filepath):
+    """
+    Outputs a set of unannotated ORFs to a specified GFF file.
+
+    Parameters
+    ----------
+    results: dict
+        A nested dictionary containing the putative ORFs
+    filepath: str
+        Filepath to save results to.
+    """
+    fp = open(filepath, 'w')
+
+    # Write csv header
+    fp.write("##gff-version\t3\n")
+    fp.write("##feature-ontology\tsofa.obo\n")
+    fp.write("##attribute-ontology\tgff3_attributes.obo\n")
+
+    # Copy chromosome entries from primary GFF
+    annotations_fp = open(args.gff)
+
+    for line in annotations_fp:
+        if "\tchromosome\t" in line:
+            fp.write(line)
+    annotations_fp.close()
+
+    # Create a CSV writer instance
+    writer = csv.writer(fp, delimiter='\t')
+
+    # Increment new ORFs
+    # TODO: CHECK TO SEE WHAT HIGHEST NUMBER ORF IS AND START THERE
+    i = 0
+
+    # write output to csv
+    for chrnum in results:
+        for orf in results[chrnum]:
+            # gff3 attributes
+            orf_id = "ORF.%d" % i
+            attributes = "ID=%s;Name=%s;description=%s" % (
+                orf_id, orf_id, orf_id
+            )
+
+            # write entry
+            writer.writerow([
+                chrnum, "utr_analysis.py", "ORF",
+                orf[0], orf[1], '.', orf[2], '.', attributes
+            ])
+            i = i + 1
+    fp.close()
+
+def combine_gff_results(input_gffs):
     """Combines GFF output generated for each individual sample into a single
     combined file."""
     # Create a dictionary to keep track of the coordinates.
@@ -1015,9 +1071,250 @@ def combine_gff_results(input_gffs, outfile, feature_name):
             else:
                 results[chromosome][gene][acceptor_site]['count'] += count
 
-    # Save summary GFF
-    output_coordinates(results, feature_name, outfile)
+    # Return combined results
+    return results
 
+def find_orfs(seq, min_protein_length, strand=1, trans_table=1):
+    """
+    Finds ORFs of a specified minimum length in a SeqRecord.
+
+    Based on: http://biopython.org/DIST/docs/tutorial/Tutorial.html#sec360
+    """
+    answer = []
+    seq_len = len(seq)
+
+    # Get sequence associated with the specified location and strand
+    if strand == 1:
+        dna_seq = seq
+    else:
+        dna_seq = seq.reverse_complement()
+
+    for frame in range(3):
+        trans = str(dna_seq[frame:].translate(trans_table))
+        trans_len = len(trans)
+        aa_start = 0
+        aa_end = 0
+
+        # Iterate through ORFS in reading frame
+        while aa_start < trans_len:
+            # Set end counter to position of next stop codon
+            aa_start = trans.find("M", aa_start)
+            aa_end = trans.find("*", aa_start)
+
+            # If no start or stop codons found, stop here
+            if aa_start == -1 or aa_end == -1:
+                break
+
+            # extend stop codon until ORF is of sufficient length
+            while (aa_end - aa_start < min_protein_length) and aa_end > -1:
+                aa_end = trans.find("*", aa_end + 1)
+
+            # If no ORFs of sufficent size found, stop here
+            if aa_end == -1:
+                break
+
+            # Compute coordinates of ORF
+            if strand == 1:
+                start = frame + aa_start * 3
+                end = min(seq_len, frame + aa_end * 3 + 3)
+            else:
+                start = seq_len - frame - aa_end * 3 - 3
+                end = seq_len - frame - aa_start * 3
+
+            # Add to output
+            str_strand = "+" if strand == 1 else '-'
+            answer.append((start, end, str_strand))
+
+            # increment start counter and continue
+            aa_start = aa_end + 1
+    answer.sort()
+    return answer
+
+def load_annotations():
+    """Loads genome annotations from specified GFF(s)."""
+    # Get chromosomes from GFF file
+    chromosomes = {}
+
+    # Load existing gene annotations
+    annotations_fp = open(args.gff)
+
+    for entry in GFF.parse(annotations_fp):
+        if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
+            chromosomes[entry.id] = entry
+
+    return chromosomes
+
+def find_unannotated_orfs(sl, polya, orf_outfile):
+    """
+    Searches through matched SL and Poly(A) acceptor sites and attempts to
+    find potential unannotated ORFs in long UTRs.
+
+    TODO: check ends of chromosomes.
+    """
+    # Get chromosomes from GFF file
+    chromosomes = load_annotations()
+
+    # Output dictionary
+    results = {}
+
+    # Keep track of number of new ORFs found
+    num_orfs = 0
+
+    for chnum in chromosomes:
+        ch = chromosomes[chnum]
+
+        results[chnum] = []
+
+        # Load SL and Poly(A) coords
+        sl_coords = sl[chnum]
+        polya_coords = polya[chnum]
+
+        # Search positive and negative strand separately
+
+        # positive strand
+        genes = [x for x in ch.features if x.type == 'gene' and x.strand == 1]
+        genes.sort(key=lambda k: k.location.start)
+
+        # ordered pairs of genes
+        pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
+
+        # Iterate over pairs of neighboring genes
+        for i, (genea, geneb) in enumerate(pairs):
+            # Gene names
+            a = genea.id
+            b = geneb.id
+
+            # 1) Check for Poly(A) coords for gene A and SL coords for gene B
+            if (a not in polya_coords) or (b not in sl_coords):
+                continue
+
+            # 2) Make sure genes are not from separate polycistronic
+            #    transcriptional units (PTUs).
+            #    25000 is much larger than what we would expect for intergenic
+            #    regions on a PTU, but small enough to exclude genes from
+            #    different PTUs.
+            if (geneb.location.start - genea.location.end) > 25000:
+                continue
+
+            # Find nearest SL/Poly(A) acceptor sites; these are reserved
+            # for the original annotated genes
+            genea_nearest_polya = min(int(x) for x in polya_coords[a].keys())
+            geneb_nearest_sl = max(int(x) for x in sl_coords[b].keys())
+
+            # Get list of eligible Poly(A) acceptor sites for gene A and spliced 
+            # leader acceptor sites for gene B.
+            genea_polya_sites = {k:polya_coords[a][k] for k in polya_coords[a].keys()
+                                    if int(k) > genea_nearest_polya}
+            geneb_sl_sites = {k:sl_coords[b][k] for k in sl_coords[b].keys()
+                                if int(k) < geneb_nearest_sl}
+
+            # 3) Make sure there is at least one "free" Poly(A) acceptor sites
+            #    associated with gene A and one free SL acceptor site associated
+            #    with gene B.
+            if (len(genea_polya_sites) == 0) or (len(geneb_sl_sites) == 0):
+                continue
+
+            # 4) Find furtherest remaining acceptor sites from each gene and
+            #    check to see if the SL site is upstream of the Poly(A) site.
+            genea_furthest_polya = max(int(x) for x in genea_polya_sites.keys())
+            geneb_furthest_sl = min(int(x) for x in geneb_sl_sites.keys())
+
+            if genea_furthest_polya < geneb_furthest_sl:
+                continue
+
+            # 5) Check for ORF of minimum required size
+            if (genea_furthest_polya - geneb_furthest_sl) < 180:
+                continue
+
+            seq = ch[geneb_furthest_sl + 1:genea_furthest_polya].seq
+            orfs = find_orfs(seq, 60, strand=1)
+
+            # No ORFs of required size found
+            if len(orfs) == 0:
+                continue
+
+            # If all checks were passed, add ORF closest to SL acceptor site;
+            # arbitrary but will serve as a placeholder to be refined in the
+            # future
+            first_orf = (orfs[0][0] + geneb_furthest_sl + 1,
+                         orfs[0][1] + geneb_furthest_sl + 1, orfs[0][2])
+            results[chnum].append(first_orf)
+            num_orfs = num_orfs + 1
+
+        # negative strand
+        genes = [x for x in ch.features if x.type in ['gene', 'ORF']
+                    and x.strand == -1]
+        genes.sort(key=lambda k: k.location.start)
+
+        # ordered pairs of genes
+        pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
+
+        # Iterate over pairs of neighboring genes
+        for i, (genea, geneb) in enumerate(pairs):
+            # Gene names
+            a = genea.id
+            b = geneb.id
+
+            # 1) Check for Poly(A) coords for gene B and SL coords for gene A
+            if (b not in polya_coords) or (a not in sl_coords):
+                continue
+
+            # 2) Make sure genes are not from separate polycistronic
+            #    transcriptional units (PTUs).
+            #    25000 is much larger than what we would expect for intergenic
+            #    regions on a PTU, but small enough to exclude genes from
+            #    different PTUs.
+            if (geneb.location.start - genea.location.end) > 25000:
+                continue
+
+            # Find nearest SL/Poly(A) acceptor sites
+            geneb_nearest_polya = max(int(x) for x in polya_coords[b].keys())
+            genea_nearest_sl = min(int(x) for x in sl_coords[a].keys())
+
+            # Get list of eligible Poly(A) acceptor sites for gene B and spliced 
+            # leader acceptor sites for gene A.
+            geneb_polya_sites = {k:polya_coords[b][k] for k in polya_coords[b].keys()
+                                    if int(k) < geneb_nearest_polya}
+            genea_sl_sites = {k:sl_coords[a][k] for k in sl_coords[a].keys()
+                                if int(k) > genea_nearest_sl}
+
+            # 3) Make sure there is at least one "free" Poly(A) acceptor sites
+            #    associated with gene B and one free SL acceptor site associated
+            #    with gene A.
+            if (len(geneb_polya_sites) == 0) or (len(genea_sl_sites) == 0):
+                continue
+
+            # 4) Find furtherest remaining acceptor sites from each gene and
+            #    check to see if the SL site is upstream of the Poly(A) site.
+            geneb_furthest_polya = min(int(x) for x in geneb_polya_sites.keys())
+            genea_furthest_sl = max(int(x) for x in genea_sl_sites.keys())
+
+            if geneb_furthest_polya > genea_furthest_sl:
+                continue
+
+            # 5) Check for ORF of minimum required size
+            if (genea_furthest_sl - geneb_furthest_polya) < 180:
+                continue
+
+            seq = ch[geneb_furthest_polya + 1:genea_furthest_sl].seq
+            orfs = find_orfs(seq, 60, strand=-1)
+
+            # No ORFs of required size found
+            if len(orfs) == 0:
+                continue
+
+            # If all checks were passed, add ORF closest to SL acceptor site;
+            # arbitrary but will serve as a placeholder to be refined in the
+            # future
+            first_orf = (orfs[-1][0] + geneb_furthest_polya + 1,
+                         orfs[-1][1] + geneb_furthest_polya + 1, orfs[-1][2])
+            results[chnum].append(first_orf)
+            num_orfs = num_orfs + 1
+
+    # save output
+    output_unannotated_orfs(results, orf_outfile)
+
+    return num_orfs
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -1478,7 +1775,7 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped trans-splicing events")
     compute_coordinates('sl', sl_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
+    #open(output_file, 'w').close()
 
 
 #-----------------------------------------------------------------------------
@@ -1534,7 +1831,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
         "# Computing coordinates for mapped polyadenylation events [A]")
     compute_coordinates('polya', polya_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
+    #open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Poly(T) Analysis
@@ -1590,7 +1887,7 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
         "# Computing coordinates for mapped polyadenylation events [T]")
     compute_coordinates('polyt', polyt_build_dir, sample_id, read_num)
-    open(output_file, 'w').close()
+    #open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Step 6: Combine coordinate output for multiple samples 
@@ -1617,7 +1914,7 @@ def combine_results(input_files, output_file):
         sl_gffs.append(gff)
 
     sl_outfile = os.path.join(combined_output_dir, 'spliced_leader.gff')
-    combine_gff_results(sl_gffs, sl_outfile, 'sl')
+    sl_combined = combine_gff_results(sl_gffs)
 
     # Combine Poly(A) output
     logging.info("# Combining Poly(A) coordinate output and filtering "
@@ -1637,7 +1934,19 @@ def combine_results(input_files, output_file):
         polya_gffs.append(gff2)
 
     polya_outfile = os.path.join(combined_output_dir, 'polya.gff')
-    combine_gff_results(polya_gffs, polya_outfile, 'polya')
+    polya_combined = combine_gff_results(polya_gffs)
+
+    # Save summary GFFs
+    output_coordinates(sl_combined, 'sl', sl_outfile)
+    output_coordinates(polya_combined, 'polya', polya_outfile)
+
+    # If no new ORFs were found on this iteration, mark coordinate-related
+    # tasks as completed.
+    orf_outfile = os.path.join(combined_output_dir, 'unannotated_orfs.gff')
+
+    logging.info("# Checking for unannotated ORFs")
+    num_orfs = find_unannotated_orfs(sl_combined, polya_combined, orf_outfile)
+    logging.info("# Found %d unannotated ORFs" % num_orfs)
 
 
 #-----------------------------------------------------------------------------
