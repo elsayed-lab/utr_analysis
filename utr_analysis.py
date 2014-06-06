@@ -718,10 +718,10 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             (strand == '-' and feature_name == 'polyt') or
             (strand == '-' and feature_name == 'sl')):
             # acceptor site at right end of read
-            acceptor_site = read.pos + read.rlen
+            acceptor_site = read.pos + read.rlen - 1
         else:
             # acceptor site at left end of read
-            acceptor_site = read.pos
+            acceptor_site = read.pos + 1
 
         # First, check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
@@ -1142,6 +1142,11 @@ def load_annotations():
         if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
             chromosomes[entry.id] = entry
 
+    # If file containing additional unannotated ORFs was specified, include
+    # those as well
+    if args.uorf_gff {
+    }
+
     return chromosomes
 
 def find_unannotated_orfs(sl, polya, orf_outfile):
@@ -1226,7 +1231,7 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             if (genea_furthest_polya - geneb_furthest_sl) < 180:
                 continue
 
-            seq = ch[geneb_furthest_sl + 1:genea_furthest_polya].seq
+            seq = ch[geneb_furthest_sl + 2:genea_furthest_polya].seq
             orfs = find_orfs(seq, 60, strand=1)
 
             # No ORFs of required size found
@@ -1296,7 +1301,7 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             if (genea_furthest_sl - geneb_furthest_polya) < 180:
                 continue
 
-            seq = ch[geneb_furthest_polya + 1:genea_furthest_sl].seq
+            seq = ch[geneb_furthest_polya + 2:genea_furthest_sl].seq
             orfs = find_orfs(seq, 60, strand=-1)
 
             # No ORFs of required size found
