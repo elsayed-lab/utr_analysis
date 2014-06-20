@@ -11,13 +11,23 @@
 #  gff_to_bedgraph.sh input.gff
 #----------------------------------------------------------
 
-outfile=${1/.*}.bedgraph
+sorted_gff=${1/.*}_sorted.gff
+outfile=${1/.*}_sorted.bedgraph
+
+# let's first sort and index the GFF files for comparison
+igvtools sort ${1} $sorted_gff
+igvtools index $sorted_gff
+
+# remove unsorted version
+rm ${1}
 
 # grab and comments
-grep '^#' $1 > $outfile
+grep '^#' $sorted_gff > $outfile
 
 # add track
 echo 'track type=bedGraph' >> $outfile
 
 # convert the remaining fields and append to output
-grep -v '^#' $1 | awk '{print $1 "\t" ($4 - 1) "\t" $5 "\t" $6}' >> $outfile
+grep -v '^#' $sorted_gff | grep -v 'chromosome' |\
+    awk '{print $1 "\t" ($4 - 1) "\t" $5 "\t" $6}' >> $outfile
+

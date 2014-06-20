@@ -41,10 +41,14 @@ import argparse
 import datetime
 import StringIO
 import textwrap
+import warnings
 import subprocess
 from ruffus import *
-from Bio import Seq,SeqIO
+from Bio import Seq,SeqIO,BiopythonDeprecationWarning
 from BCBio import GFF
+
+# Hide Biopython deprecation warnings
+warnings.simplefilter('ignore', BiopythonDeprecationWarning)
 
 #--------------------------------------
 # FASTQ row indices
@@ -113,9 +117,9 @@ def parse_input():
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-p', '--min-polya-length', default=10, type=int,
                         help='Minimum length of Poly-A match (default=10)')
-    parser.add_argument('-w', '--window-size', default=10000, type=int,
+    parser.add_argument('-w', '--window-size', default=15000, type=int,
                         help=('Number of bases up or downstream of feature to'
-                              'scan for related genes (default=10000)'))
+                              'scan for related genes (default=15000)'))
     parser.add_argument('--num-threads', default=4, type=int,
                         help='Number of threads to use.')
 
@@ -382,15 +386,16 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
     log_handle.info("# Converting Tophat bam output to FASTQ")
     run_bam2fastx(bam_input, output_fastq, log_handle)
 
-def get_next_log_name(base_name):
-    """Returns a filepath for the next highest log number"""
+def get_next_file_name(base_name):
+    """Returns a filepath for the next highest file number, e.g.
+       file.5.log."""
     if not os.path.exists(base_name):
         return base_name
     else:
-        log_nums = [int(x.split('.').pop()) 
+        file_nums = [int(x.split('.').pop()) 
                         for x in glob.glob("%s.*" % base_name)]
-        next_log_num = max([0] + log_nums) + 1
-        return "%s.%d" % (base_name, next_log_num)
+        next_file_num = max([0] + file_nums) + 1
+        return "%s.%d" % (base_name, next_file_num)
 
 def find_sequence(input_file, feature_name, sequence_filter, feature_regex, 
                   build_dir, sample_id, read_num, trim_direction='left',
@@ -641,12 +646,9 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     # output directory
     output_dir = '%s/%s/results' % (build_dir, sample_id)
 
-    # If processing Poly(A)/Poly(T), load genome sequence as well
-    # This will be used to make sure number of A's or T's in read exceeds
-    # the number found at the mapped location in the genome.
-    if feature_name != 'sl':
-        genome = SeqIO.parse(args.target_genome, 'fasta')
-        chr_sequences = {x.id:x for x in genome}
+    # Load genome sequence
+    genome = SeqIO.parse(args.target_genome, 'fasta')
+    chr_sequences = {x.id:x for x in genome}
 
     # Get chromosomes from GFF file
     chromosomes = load_annotations()
@@ -679,6 +681,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     )
     sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
                                 'strand', 'trimmed_start', 'trimmed_stop',
+                                'untrimmed_start', 'untrimmed_stop', 
                                 'acceptor_site'])
 
     # Load the untrimmed reads in order to to determine original read lengths
@@ -713,6 +716,10 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         chromosome = sam.getrname(read.tid)
         strand = "-" if read.is_reverse else "+"
 
+        # Length of matched SL suffix or number of A's/T's
+        untrimmed_read = untrimmed_reads[read.qname][read_num]
+        feature_length = untrimmed_read.rlen - read.rlen
+
         # SL/Poly(A) acceptor site location
         if ((strand == '+' and feature_name == 'polya') or 
             (strand == '-' and feature_name == 'polyt') or
@@ -729,10 +736,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             inside_cds.writerow([read.qname, chromosome, strand, acceptor_site])
             num_inside_cds = num_inside_cds + 1
             continue
-
-        # Length of matched SL suffix or number of A's/T's
-        untrimmed_read = untrimmed_reads[read.qname][read_num]
-        feature_length = untrimmed_read.rlen - read.rlen
 
         if feature_name in ['polya', 'polyt']:
             # Count number of A's / T's just downstream of acceptor site
@@ -769,9 +772,17 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 genomic_count = re.match("^T*", str(rec.seq[::-1])).end()
                 if not feature_length > genomic_count:
                     continue
+        else:
+            # Perform a similar check for the SL on the positive strand
+            rec = chr_sequences[chromosome][read.pos - feature_length:
+                                            read.pos]
+            # check for exact match
+            if args.spliced_leader[-len(rec):] == str(rec.seq):
+                continue
 
         # Find nearest gene
-        gene = find_closest_gene(chromosomes[chromosome], strand, acceptor_site)
+        gene = find_closest_gene(chromosomes[chromosome], strand, feature_name,
+                                 acceptor_site)
 
         # If no nearby genes were found, stop here
         if gene is None:
@@ -827,9 +838,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
     logging.info("# Finished!")
 
-    # clean up
-    annotations_fp.close()
-
 def is_inside_cds(chromosome, location):
     """
     Checks to see if a putative acceptor site is inside an annotated CDS.
@@ -853,34 +861,35 @@ def is_inside_cds(chromosome, location):
     # interest
     nearby = chromosome[location - half_window:location + half_window]
 
+    # recompute midpoint subregion in case we are near the end of the
+    # chromosome
+    midpoint = len(nearby) / 2
+
     # scan all genes near putative feature
     for feature in nearby.features:
-        # (half_window is the center point in new sub-region)
-        if ((feature.location.start <= half_window) and 
-            (feature.location.end >= half_window)):
+        if ((feature.location.start <= midpoint) and 
+            (feature.location.end >= midpoint)):
             return True
 
     return False
 
-def find_closest_gene(chromosome, strand, location):
+def find_closest_gene(chromosome, strand, feature_name, location):
     """
     Finds the closest gene to a specified location that is in the expected
     orientation.
     """
-    # 1. Get genes within +/- N bases of location (if any)
-    # 2. Find closest match
-    if strand == "+":
-        # For positive-strand sites, search region just downstream 
-        # of splice-site for genes
-        subseq = chromosome[location:location + args.window_size]
-        gene_start = 'start'
-        offset = 0
-    else:
-        # For negative-strand sites, search region just upstream
-        # of splice-site for genes
-        subseq = chromosome[location - args.window_size:location]
-        gene_start = 'end'
-        offset = args.window_size
+    # 1. Get genes within +/- args.window_size/2 bases of location
+    ch_end =  int(chromosome.features[0].location.end)
+    half_win = args.window_size / 2
+
+    # Window boundaries
+    window_start = max(0, location - half_win)
+    window_end = min(ch_end, location + half_win)
+
+    subseq = chromosome[window_start:window_end]
+
+    # Feature location relative to the subsequence
+    feature_location = location - window_start
 
     # If there are no nearby genes, stop here
     if len(subseq.features) == 0:
@@ -892,14 +901,48 @@ def find_closest_gene(chromosome, strand, location):
     closest_dist = float('inf')
 
     for i, gene in enumerate(subseq.features):
-        dist = abs(offset - int(getattr(gene.location, gene_start)))
+        # For SL, look at gene start locations and for Poly(A)/(T) look
+        # at where each gene ends.
+
+        # Gene on positive strand
+        if gene.strand == 1:
+            # SL acceptor site
+            if feature_name == 'sl':
+                dist = gene.location.start - feature_location
+            # Poly(A) acceptor site
+            else:
+                dist = feature_location - gene.location.end
+
+            # make sure gene is downstream of SL / upstream of Poly(A)
+            if dist < 0:
+                continue
+
+        # Gene on negative strand
+        else:
+            # SL acceptor site
+            if feature_name == 'sl':
+                dist = feature_location - gene.location.end
+            # Poly(A) acceptor site
+            else:
+                dist = gene.location.start - feature_location
+
+            # make sure gene is downstream of SL / upstream of Poly(A)
+            if dist < 0:
+                continue
+
+        # For Poly(A) look at gene endings
         if dist < closest_dist:
             closest_index = i
             closest_gene = gene.id
             closest_dist = dist
+    
+    # No genes found in correct orientation
+    if closest_gene is None:
+        return None
 
     # Get description of closest matching gene
     desc_qualifiers = subseq.features[closest_index].qualifiers['description']
+
     if len(desc_qualifiers) > 0:
         gene_description = desc_qualifiers[0]
     else:
@@ -914,7 +957,7 @@ def find_closest_gene(chromosome, strand, location):
         'distance': closest_dist
     }
 
-def output_coordinates(results, feature_name, filepath):
+def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
     """
     Outputs the feature coordinates as a GFF3 file.
 
@@ -934,6 +977,7 @@ def output_coordinates(results, feature_name, filepath):
     fp.write("##gff-version\t3\n")
     fp.write("##feature-ontology\tsofa.obo\n")
     fp.write("##attribute-ontology\tgff3_attributes.obo\n")
+    fp.write("#track name=%s color=%s\n" % (feature_name.upper(), track_color))
 
     # Copy chromosome entries from primary GFF
     annotations_fp = open(args.gff)
@@ -986,6 +1030,7 @@ def output_unannotated_orfs(results, filepath):
     fp.write("##gff-version\t3\n")
     fp.write("##feature-ontology\tsofa.obo\n")
     fp.write("##attribute-ontology\tgff3_attributes.obo\n")
+    fp.write("#track name=unannotated_ORFs color='134,166,83'\n")
 
     # Copy chromosome entries from primary GFF
     annotations_fp = open(args.gff)
@@ -999,7 +1044,6 @@ def output_unannotated_orfs(results, filepath):
     writer = csv.writer(fp, delimiter='\t')
 
     # Increment new ORFs
-    # TODO: CHECK TO SEE WHAT HIGHEST NUMBER ORF IS AND START THERE
     i = 0
 
     # write output to csv
@@ -1036,14 +1080,20 @@ def combine_gff_results(input_gffs):
         fp.readline()
         fp.readline()
         fp.readline()
+        fp.readline()
 
         # Parse with CSV reader
         reader = csv.DictReader(fp, delimiter='\t', fieldnames=gff_fields)
 
         for row in reader:
+            # Skip chromosome entries
+            if row['feature'] == 'chromosome':
+                continue
+
             # Chromosome
             chromosome = row['chromosome']
             acceptor_site = row['start']
+
             count = int(row['count'])
             strand = row['strand']
 
@@ -1144,8 +1194,14 @@ def load_annotations():
 
     # If file containing additional unannotated ORFs was specified, include
     # those as well
-    if args.uorf_gff {
-    }
+    if args.uorf_gff:
+        for ch in GFF.parse(open(args.uorf_gff)):
+            for feature in ch.features:
+                if feature.type == 'ORF':
+                    chromosomes[ch.id].features.append(feature)
+
+    # clean up
+    annotations_fp.close()
 
     return chromosomes
 
@@ -1165,6 +1221,9 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
     # Keep track of number of new ORFs found
     num_orfs = 0
 
+    # TESTING 2014/06/12
+    import pickle
+
     for chnum in chromosomes:
         ch = chromosomes[chnum]
 
@@ -1177,11 +1236,20 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
         # Search positive and negative strand separately
 
         # positive strand
-        genes = [x for x in ch.features if x.type == 'gene' and x.strand == 1]
+        genes = [x for x in ch.features if x.type in ['gene', 'ORF'] 
+                   and x.strand == 1]
         genes.sort(key=lambda k: k.location.start)
 
         # ordered pairs of genes
         pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
+    
+        # TESTING 2014/06/12
+        pickle.dump(ch, open("ch.p", "wb"))
+        pickle.dump(sl_coords, open("sl_coords.p", "wb"))
+        pickle.dump(polya_coords, open("polya_coords.p", "wb"))
+        pickle.dump(genes, open("genes.p", "wb"))
+        pickle.dump(sl, open('sl_combined.p','wb'))
+        pickle.dump(polya, open('polya_combined.p','wb'))
 
         # Iterate over pairs of neighboring genes
         for i, (genea, geneb) in enumerate(pairs):
@@ -1223,6 +1291,11 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             #    check to see if the SL site is upstream of the Poly(A) site.
             genea_furthest_polya = max(int(x) for x in genea_polya_sites.keys())
             geneb_furthest_sl = min(int(x) for x in geneb_sl_sites.keys())
+
+            # TESTING
+            #if a == 'LmjF.01.0440':
+            #    print(i)
+            #    break
 
             if genea_furthest_polya < geneb_furthest_sl:
                 continue
@@ -1315,6 +1388,15 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
                          orfs[-1][1] + geneb_furthest_polya + 1, orfs[-1][2])
             results[chnum].append(first_orf)
             num_orfs = num_orfs + 1
+
+        # Add ORFs found on previous iterations to results
+        if args.uorf_gff:
+            orfs = [x for x in ch.features if x.type == 'ORF']
+            orfs.sort(key=lambda k: k.location.start)
+
+            for orf in orfs:
+                results[chnum].append((orf.location.start, orf.location.end,
+                                       orf.strand))
 
     # save output
     output_unannotated_orfs(results, orf_outfile)
@@ -1418,7 +1500,7 @@ date_format = '%Y-%m-%d %I:%M:%S %p'
 formatter = logging.Formatter(log_format, datefmt=date_format)
 
 # determine log name to use
-master_log = get_next_log_name(os.path.join(args.build_directory, 'build.log'))
+master_log = get_next_file_name(os.path.join(args.build_directory, 'build.log'))
 
 logging.basicConfig(filename=master_log,
                     level=logging.INFO,
@@ -1458,7 +1540,7 @@ for sample_id in sample_ids_all:
             else:
                 bdir = polyt_build_dir
 
-            sample_log_name = get_next_log_name(
+            sample_log_name = get_next_file_name(
                 os.path.join(bdir, sample_id, 'log', '%s_%s_%s.log' % (
                     sample_id, analysis, read_num
                 ))
@@ -1780,7 +1862,7 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped trans-splicing events")
     compute_coordinates('sl', sl_build_dir, sample_id, read_num)
-    #open(output_file, 'w').close()
+    open(output_file, 'w').close()
 
 
 #-----------------------------------------------------------------------------
@@ -1836,7 +1918,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
         "# Computing coordinates for mapped polyadenylation events [A]")
     compute_coordinates('polya', polya_build_dir, sample_id, read_num)
-    #open(output_file, 'w').close()
+    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Poly(T) Analysis
@@ -1892,7 +1974,7 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
         "# Computing coordinates for mapped polyadenylation events [T]")
     compute_coordinates('polyt', polyt_build_dir, sample_id, read_num)
-    #open(output_file, 'w').close()
+    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Step 6: Combine coordinate output for multiple samples 
@@ -1942,17 +2024,19 @@ def combine_results(input_files, output_file):
     polya_combined = combine_gff_results(polya_gffs)
 
     # Save summary GFFs
-    output_coordinates(sl_combined, 'sl', sl_outfile)
-    output_coordinates(polya_combined, 'polya', polya_outfile)
+    output_coordinates(sl_combined, 'sl', sl_outfile, track_color='83,166,156')
+    output_coordinates(polya_combined, 'polya', polya_outfile,
+                       track_color='166,83,93')
 
     # If no new ORFs were found on this iteration, mark coordinate-related
     # tasks as completed.
-    orf_outfile = os.path.join(combined_output_dir, 'unannotated_orfs.gff')
+    orf_outfile = get_next_file_name(
+        os.path.join(combined_output_dir, 'unannotated_orfs.gff')
+    )
 
     logging.info("# Checking for unannotated ORFs")
     num_orfs = find_unannotated_orfs(sl_combined, polya_combined, orf_outfile)
     logging.info("# Found %d unannotated ORFs" % num_orfs)
-
 
 #-----------------------------------------------------------------------------
 # Run pipeline

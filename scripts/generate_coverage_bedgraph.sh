@@ -32,3 +32,8 @@ done
 echo "Combining multiple bedgraphs into a single summary bedgraph"
 unionBedGraphs -empty -g /tmp/bedtools.genome \
     -i $(echo $INPUT_FILES | sed 's/\.bam/_coverage\.bedgraph/g') > coverage.bedgraph
+
+# Generate binary TDF version as well
+echo "Converting to TDF"
+igvtools toTDF coverage.bedgraph coverage.tdf /tmp/bedtools.genome
+
