@@ -1033,12 +1033,12 @@ def output_unannotated_orfs(results, filepath):
     fp.write("#track name=unannotated_ORFs color='134,166,83'\n")
 
     # Copy chromosome entries from primary GFF
-    annotations_fp = open(args.gff)
+    #annotations_fp = open(args.gff)
 
-    for line in annotations_fp:
-        if "\tchromosome\t" in line:
-            fp.write(line)
-    annotations_fp.close()
+    #for line in annotations_fp:
+    #    if "\tchromosome\t" in line:
+    #        fp.write(line)
+    #annotations_fp.close()
 
     # Create a CSV writer instance
     writer = csv.writer(fp, delimiter='\t')
@@ -1244,12 +1244,12 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
         pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
     
         # TESTING 2014/06/12
-        pickle.dump(ch, open("ch.p", "wb"))
-        pickle.dump(sl_coords, open("sl_coords.p", "wb"))
-        pickle.dump(polya_coords, open("polya_coords.p", "wb"))
-        pickle.dump(genes, open("genes.p", "wb"))
-        pickle.dump(sl, open('sl_combined.p','wb'))
-        pickle.dump(polya, open('polya_combined.p','wb'))
+        #pickle.dump(ch, open("ch.p", "wb"))
+        #pickle.dump(sl_coords, open("sl_coords.p", "wb"))
+        #pickle.dump(polya_coords, open("polya_coords.p", "wb"))
+        #pickle.dump(genes, open("genes.p", "wb"))
+        #pickle.dump(sl, open('sl_combined.p','wb'))
+        #pickle.dump(polya, open('polya_combined.p','wb'))
 
         # Iterate over pairs of neighboring genes
         for i, (genea, geneb) in enumerate(pairs):
@@ -1277,9 +1277,11 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             # Get list of eligible Poly(A) acceptor sites for gene A and spliced 
             # leader acceptor sites for gene B.
             genea_polya_sites = {k:polya_coords[a][k] for k in polya_coords[a].keys()
-                                    if int(k) > genea_nearest_polya}
+                                    if ((int(k) > genea_nearest_polya) and 
+                                        (int(k) < geneb_nearest_sl))}
             geneb_sl_sites = {k:sl_coords[b][k] for k in sl_coords[b].keys()
-                                if int(k) < geneb_nearest_sl}
+                                if ((int(k) < geneb_nearest_sl) and
+                                    (int(k) > genea_nearest_polya))}
 
             # 3) Make sure there is at least one "free" Poly(A) acceptor sites
             #    associated with gene A and one free SL acceptor site associated
@@ -1292,10 +1294,6 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             genea_furthest_polya = max(int(x) for x in genea_polya_sites.keys())
             geneb_furthest_sl = min(int(x) for x in geneb_sl_sites.keys())
 
-            # TESTING
-            #if a == 'LmjF.01.0440':
-            #    print(i)
-            #    break
 
             if genea_furthest_polya < geneb_furthest_sl:
                 continue
@@ -1316,6 +1314,7 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             # future
             first_orf = (orfs[0][0] + geneb_furthest_sl + 1,
                          orfs[0][1] + geneb_furthest_sl + 1, orfs[0][2])
+
             results[chnum].append(first_orf)
             num_orfs = num_orfs + 1
 
@@ -1350,11 +1349,13 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             genea_nearest_sl = min(int(x) for x in sl_coords[a].keys())
 
             # Get list of eligible Poly(A) acceptor sites for gene B and spliced 
-            # leader acceptor sites for gene A.
+            # leader acceptor sites for gene A 
             geneb_polya_sites = {k:polya_coords[b][k] for k in polya_coords[b].keys()
-                                    if int(k) < geneb_nearest_polya}
+                                    if ((int(k) < geneb_nearest_polya) and 
+                                        (int(k) > genea_nearest_sl))}
             genea_sl_sites = {k:sl_coords[a][k] for k in sl_coords[a].keys()
-                                if int(k) > genea_nearest_sl}
+                                if ((int(k) > genea_nearest_sl) and
+                                    (int(k) < geneb_nearest_polya))}
 
             # 3) Make sure there is at least one "free" Poly(A) acceptor sites
             #    associated with gene B and one free SL acceptor site associated
@@ -1386,6 +1387,10 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             # future
             first_orf = (orfs[-1][0] + geneb_furthest_polya + 1,
                          orfs[-1][1] + geneb_furthest_polya + 1, orfs[-1][2])
+            # TESTING
+            #if a == 'LmjF.01.0010':
+            #    import pdb; pdb.set_trace()
+
             results[chnum].append(first_orf)
             num_orfs = num_orfs + 1
 
