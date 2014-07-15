@@ -42,7 +42,7 @@ def main():
     for ch in GFF.parse(open(gff)):
         for entry in ch.features:
             if entry.type == 'gene':
-                genes[entry.id] = entry 
+                genes[entry.id] = entry
 
     # Load SL and Poly(A) sites
     printb("Loading SL acceptor sites...")
@@ -56,13 +56,18 @@ def main():
     # 5'UTR lengths
     printb("Computing 5'UTR lengths...")
 
-    utr5_lengths_proc = compute_5utr_lengths(sl_proc, genes, 
+    utr5_lengths_proc = compute_5utr_lengths(sl_proc, genes,
                                          'output/lmajor_5UTR_lengths_proc.txt')
-    utr5_lengths_meta = compute_5utr_lengths(sl_meta, genes, 
+    utr5_lengths_meta = compute_5utr_lengths(sl_meta, genes,
                                          'output/lmajor_5UTR_lengths_meta.txt')
     # Write combined 5'UTR lengths
     with open('output/lmajor_5UTR_lengths_all.txt', 'w') as fp:
         fp.writelines(sorted(utr5_lengths_proc + utr5_lengths_meta))
+
+    ########################################
+    # TESTING
+    ########################################
+    sys.exit()
 
     # 3'UTR lengths
     printb("Computing 3'UTR lengths...")
@@ -98,8 +103,8 @@ def main():
 
     # Primary/minor SL site usage stats in procyclic and metacyclic samples
     printb("Determining primary and minor trans-splicing site usage across conditions")
-    output_site_usage(genes, 
-                      sl_proc, 'procyclic_num_reads', 
+    output_site_usage(genes,
+                      sl_proc, 'procyclic_num_reads',
                       sl_meta, 'metacyclic_num_reads',
                       'output/lmajor_primary_trans_splicing_site_proc.txt',
                       'output/lmajor_minor_trans_splicing_site_proc.txt')
@@ -109,6 +114,20 @@ def main():
                       sl_proc, 'procyclic_num_reads',
                       'output/lmajor_primary_trans_splicing_site_meta.txt',
                       'output/lmajor_minor_trans_splicing_site_meta.txt')
+
+    # Primary/minor Poly(A) site usage stats in procyclic and metacyclic samples
+    printb("Determining primary and minor poly-adenylation acceptor site usage across conditions")
+    output_site_usage(genes,
+                      polya_proc, 'procyclic_num_reads',
+                      polya_meta, 'metacyclic_num_reads',
+                      'output/lmajor_primary_polya_site_proc.txt',
+                      'output/lmajor_minor_polya_site_proc.txt')
+
+    output_site_usage(genes,
+                      polya_meta, 'metacyclic_num_reads',
+                      polya_proc, 'procyclic_num_reads',
+                      'output/lmajor_primary_polya_site_meta.txt',
+                      'output/lmajor_minor_polya_site_meta.txt')
 
 def printb(text):
     """Print text in bold"""
@@ -136,11 +155,18 @@ def compute_5utr_lengths(sl, genes, outfile):
                 continue
             gene = genes[gene_id]
 
+            # For information on biopython feature locations, see:
+            # http://biopython.org/DIST/docs/api/Bio.SeqFeature.FeatureLocation-class.html
+            acceptor_site_location = entry.location.end
+
             # otherwise get the UTR length
             if gene.strand == 1:
-                length = gene.location.start - entry.location.start
+                length = (gene.location.start + 1) - acceptor_site_location
             else:
-                length = entry.location.start - gene.location.end
+                length = acceptor_site_location - gene.location.end
+
+            if length < 1:
+                import pdb; pdb.set_trace()
 
             utr5_lengths.append("%s\n" % length)
 
@@ -169,11 +195,15 @@ def compute_3utr_lengths(polya, genes, outfile):
                 continue
             gene = genes[gene_id]
 
+            # For information on biopython feature locations, see:
+            # http://biopython.org/DIST/docs/api/Bio.SeqFeature.FeatureLocation-class.html
+            acceptor_site_location = entry.location.end
+
             # otherwise get the UTR length
             if gene.strand == 1:
-                length = entry.location.start - gene.location.end
+                length = acceptor_site_location - gene.location.end
             else:
-                length = gene.location.start - entry.location.start
+                length = (gene.location.start + 1) - acceptor_site_location
 
             utr3_lengths.append("%s\n" % length)
 
@@ -251,14 +281,14 @@ def get_primary_and_minor_acceptor_site(sites):
 def get_covered_geneids(ch):
     """Gets a list of gene IDs for which acceptor sites have been observed"""
     # first, get a list of all of the genes covered
-    gene_ids = list(set([x.qualifiers['Name'][0] for x in ch.features 
+    gene_ids = list(set([x.qualifiers['Name'][0] for x in ch.features
                          if x.type != 'chromosome']))
     gene_ids = []
     for entry in ch.features:
         if entry.type == 'chromosome':
             continue
         gene_id = entry.qualifiers['Name'][0]
-        
+
         if gene_id.startswith('ORF'):
             continue
         gene_ids.append(gene_id)
@@ -282,23 +312,23 @@ def get_site_by_location(sites, loc):
     # LmjF.01.0020       -       01       7440       7631       71       108
     # LmjF.01.0030       -       01       11068       11655       148       166
 
-def output_site_usage(genes, conda, conda_name, condb, condb_name, 
+def output_site_usage(genes, conda, conda_name, condb, condb_name,
                       primary_outfile, minor_outfile):
     """Computes acceptor site usage statistics for primary and minor sites
     under varying conditions"""
     # primary site CSV writer
-    writer_primary_conda = csv.writer(open(primary_outfile, 'w'), 
+    writer_primary_conda = csv.writer(open(primary_outfile, 'w'),
                                       delimiter='\t')
 
     writer_primary_conda.writerow([
-        'gene', 'strand', 'chromosome', 
+        'gene', 'strand', 'chromosome',
         'utr_start', 'utr_stop', conda_name, condb_name
     ])
 
     # minor site CSV writer
     writer_minor_conda = csv.writer(open(minor_outfile, 'w'), delimiter='\t')
     writer_minor_conda.writerow([
-        'gene', 'strand', 'chromosome', 
+        'gene', 'strand', 'chromosome',
         'utr_start', 'utr_stop', conda_name, condb_name
     ])
 

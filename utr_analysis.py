@@ -94,7 +94,7 @@ def parse_input():
     parser.add_argument('-f1', '--target-genome', dest='target_genome',
                         required=True, help=('Genome sequence FASTA filepath '
                         'for target species'))
-    parser.add_argument('-f2', '--nontarget-genome', dest='nontarget_genome', 
+    parser.add_argument('-f2', '--nontarget-genome', dest='nontarget_genome',
                         help=('Genome sequence FASTA filepath for species to '
                               'be filtered out prior to mapping. (optional)'))
     parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
@@ -105,7 +105,7 @@ def parse_input():
                               'back in to re-perform analyses treating these '
                               'locations as putative ORFs.'))
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
-                        required=True, help='Spliced leader DNA sequence', 
+                        required=True, help='Spliced leader DNA sequence',
                         default=None)
     parser.add_argument('-es', '--exclude-internal-sl-matches',
                         help=('Only allow matches with the SL at the upstream'
@@ -235,7 +235,7 @@ def sort_and_index(base_output, log_handle):
     run_command(index_cmd, log_handle, wait=False)
     log_handle.info("# Done sorting and indexing")
 
-def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1, 
+def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
                max_multihits=20, extra_args=""):
     """
     Uses Tophat to map reads with the specified settings.
@@ -247,11 +247,11 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     included below for convenience.
 
     -N/--read-mismatches
-        Final read alignments having more than these many mismatches are 
+        Final read alignments having more than these many mismatches are
         discarded. The default is 2.
 
     -x/--transcriptome-max-hits
-        Maximum number of mappings allowed for a read, when aligned to the 
+        Maximum number of mappings allowed for a read, when aligned to the
         transcriptome (any reads found with more then this number of mappings
         will be discarded).
 
@@ -283,7 +283,7 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
 
     # build command
     cmd = "tophat --num-threads %d --max-multihits %d %s -o %s %s %s %s" % (
-           num_threads, max_multihits, extra_args, 
+           num_threads, max_multihits, extra_args,
            output_dir, genome_basename, r1, r2)
 
     # run tophat
@@ -392,12 +392,12 @@ def get_next_file_name(base_name):
     if not os.path.exists(base_name):
         return base_name
     else:
-        file_nums = [int(x.split('.').pop()) 
+        file_nums = [int(x.split('.').pop())
                         for x in glob.glob("%s.*" % base_name)]
         next_file_num = max([0] + file_nums) + 1
         return "%s.%d" % (base_name, next_file_num)
 
-def find_sequence(input_file, feature_name, sequence_filter, feature_regex, 
+def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
                   build_dir, sample_id, read_num, trim_direction='left',
                   reverse=False):
     """
@@ -513,7 +513,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
         # otherwise add to output fastq
 
-        # If feature is expected to be found at left of read, trim everything 
+        # If feature is expected to be found at left of read, trim everything
         # up to the end of the match
         if trim_direction == 'left':
             trimmed_read = [read[ID_IDX],
@@ -541,7 +541,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         reads_trimmed.write("\n".join(trimmed_read) + "\n")
 
         # Also save complete (untrimmed) reads containing the matched sequence.
-        # By mapping these reads to the genome we can eliminate false hits; 
+        # By mapping these reads to the genome we can eliminate false hits;
         # i.e. reads that contain a portion of the sequence of intereste but
         # are not actual trans-splicing / poly-adenylation reads.
         untrimmed_read = [read[ID_IDX],
@@ -561,7 +561,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         read_ids.append(read[ID_IDX])
 
     # log numbers
-    log.info("# Found %d reads with possible %s fragment" % 
+    log.info("# Found %d reads with possible %s fragment" %
              (len(read_ids), feature_name))
 
     # Create output directory
@@ -681,7 +681,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     )
     sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
                                 'strand', 'trimmed_start', 'trimmed_stop',
-                                'untrimmed_start', 'untrimmed_stop', 
+                                'untrimmed_start', 'untrimmed_stop',
                                 'acceptor_site'])
 
     # Load the untrimmed reads in order to to determine original read lengths
@@ -708,7 +708,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     # Get coordinate and strand for each read in bam file
     for read in sam:
         # Get read where feature sequence was found
-        if ((read.is_read1 and read_num == 'R2') or 
+        if ((read.is_read1 and read_num == 'R2') or
             (read.is_read2 and read_num == 'R1')):
             continue
 
@@ -721,7 +721,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         feature_length = untrimmed_read.rlen - read.rlen
 
         # SL/Poly(A) acceptor site location
-        if ((strand == '+' and feature_name == 'polya') or 
+        if ((strand == '+' and feature_name == 'polya') or
             (strand == '-' and feature_name == 'polyt') or
             (strand == '-' and feature_name == 'sl')):
             # acceptor site at right end of read
@@ -729,7 +729,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         else:
             # acceptor site at left end of read
             acceptor_site = read.pos + 1
-
+http://biopython.org/DIST/docs/api/Bio.SeqFeature.FeatureLocation-class.html
         # First, check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
         if is_inside_cds(chromosomes[chromosome], acceptor_site):
@@ -739,7 +739,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         if feature_name in ['polya', 'polyt']:
             # Count number of A's / T's just downstream of acceptor site
-            if ((feature_name == 'polya' and strand == '+') or 
+            if ((feature_name == 'polya' and strand == '+') or
                 (feature_name == 'polyt' and strand == '-')):
                 # Check for A's at right end of read
                 # This is what we expect for either positive-strand Poly(A)
@@ -853,22 +853,31 @@ def is_inside_cds(chromosome, location):
     ------
     bool
         True if the feature is located in a known CDS.
+
+    References
+    ----------
+    http://biopython.org/DIST/docs/api/Bio.SeqFeature.FeatureLocation-class.html
     """
     # Number of bases before or after feature
-    half_window = args.window_size / 2
+    half_window = int(args.window_size / 2)
 
     # Extract region of sequence surrounding the putative feature of
     # interest
-    nearby = chromosome[location - half_window:location + half_window]
+    nearby = chromosome[max(location - half_window, 0):location + half_window]
 
-    # recompute midpoint subregion in case we are near the end of the
-    # chromosome
-    midpoint = len(nearby) / 2
+    # determine relative location of acceptor_site
+    if location < half_window:
+        # at left-end, relative site is the actual one
+        relative_location = location
+    else:
+        # otherwise, window will be centered around the acceptor site, possibly
+        # clipped at the right-end
+        relative_location = len(nearby) / 2
 
     # scan all genes near putative feature
     for feature in nearby.features:
-        if ((feature.location.start <= midpoint) and 
-            (feature.location.end >= midpoint)):
+        if ((feature.location.start <= relative_location) and
+            (feature.location.end >= relative_location)):
             return True
 
     return False
@@ -935,7 +944,7 @@ def find_closest_gene(chromosome, strand, feature_name, location):
             closest_index = i
             closest_gene = gene.id
             closest_dist = dist
-    
+
     # No genes found in correct orientation
     if closest_gene is None:
         return None
@@ -1070,7 +1079,7 @@ def combine_gff_results(input_gffs):
     results = {}
 
     # GFF entry fields
-    gff_fields = ['chromosome', 'script', 'feature', 'start', 'stop', 'count', 
+    gff_fields = ['chromosome', 'script', 'feature', 'start', 'stop', 'count',
                   'strand', 'quality', 'description']
 
     # Parse individual GFFs and create a new summary GFF
@@ -1236,13 +1245,13 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
         # Search positive and negative strand separately
 
         # positive strand
-        genes = [x for x in ch.features if x.type in ['gene', 'ORF'] 
+        genes = [x for x in ch.features if x.type in ['gene', 'ORF']
                    and x.strand == 1]
         genes.sort(key=lambda k: k.location.start)
 
         # ordered pairs of genes
         pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
-    
+
         # TESTING 2014/06/12
         pickle.dump(ch, open("ch.p", "wb"))
         pickle.dump(sl_coords, open("sl_coords.p", "wb"))
@@ -1274,10 +1283,10 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             genea_nearest_polya = min(int(x) for x in polya_coords[a].keys())
             geneb_nearest_sl = max(int(x) for x in sl_coords[b].keys())
 
-            # Get list of eligible Poly(A) acceptor sites for gene A and spliced 
+            # Get list of eligible Poly(A) acceptor sites for gene A and spliced
             # leader acceptor sites for gene B.
             genea_polya_sites = {k:polya_coords[a][k] for k in polya_coords[a].keys()
-                                    if ((int(k) > genea_nearest_polya) and 
+                                    if ((int(k) > genea_nearest_polya) and
                                         (int(k) < geneb_nearest_sl))}
             geneb_sl_sites = {k:sl_coords[b][k] for k in sl_coords[b].keys()
                                 if ((int(k) < geneb_nearest_sl) and
@@ -1348,10 +1357,10 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
             geneb_nearest_polya = max(int(x) for x in polya_coords[b].keys())
             genea_nearest_sl = min(int(x) for x in sl_coords[a].keys())
 
-            # Get list of eligible Poly(A) acceptor sites for gene B and spliced 
-            # leader acceptor sites for gene A 
+            # Get list of eligible Poly(A) acceptor sites for gene B and spliced
+            # leader acceptor sites for gene A
             geneb_polya_sites = {k:polya_coords[b][k] for k in polya_coords[b].keys()
-                                    if ((int(k) < geneb_nearest_polya) and 
+                                    if ((int(k) < geneb_nearest_polya) and
                                         (int(k) > genea_nearest_sl))}
             genea_sl_sites = {k:sl_coords[a][k] for k in sl_coords[a].keys()
                                 if ((int(k) > genea_nearest_sl) and
@@ -1486,7 +1495,7 @@ if args.nontarget_genome:
 
 for sample_id in sample_ids:
     # shared directories
-    for sub_dir in shared_subdirs: 
+    for sub_dir in shared_subdirs:
         outdir = os.path.join(shared_build_dir, sample_id, sub_dir)
         if not os.path.exists(outdir):
             os.makedirs(outdir, mode=0o755)
@@ -1584,7 +1593,7 @@ for sample_id in sample_ids_all:
 # To keep track of Ruffus's progress, empty sentinel files are created in
 # the ruffus subdirectory of each sample. The sentinel filenames are encoded
 # with some information about the currently running task, which are parsed
-# using a regular expression. For the first main task (parse_sl_reads), the 
+# using a regular expression. For the first main task (parse_sl_reads), the
 # input is not a sentinel file, but an input fastq filepath. The various
 # componenets of the regular expression used in this case is provided as
 # an example below.
@@ -1760,7 +1769,7 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
         # if nontarget genome was specified, use output from that step
         input_fastq_dir = os.path.join(shared_build_dir, sample_id,
                                     'fastq', 'nontarget_reads_removed')
-        r1 = os.path.join(input_fastq_dir, 
+        r1 = os.path.join(input_fastq_dir,
                         "%s_nontarget_reads_removed.1.fastq.gz" % (sample_id))
         r2 = r1.replace(".1", ".2")
     else:
@@ -1779,7 +1788,7 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
         output_fastq_dir, "%s_genomic_reads_removed.fastq.gz" % (sample_id))
 
     # map reads and remove hits
-    filter_mapped_reads(r1, r2, args.target_genome, tophat_dir, output_fastq, 
+    filter_mapped_reads(r1, r2, args.target_genome, tophat_dir, output_fastq,
                         logging)
     logging.info("# Finished removing genomic reads.")
 
@@ -1815,12 +1824,12 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
     # Determine strings to match in reads
     if args.exclude_internal_sl_matches:
         sl_regex = '|'.join(
-            ["^" + args.spliced_leader[-x:] for x in 
+            ["^" + args.spliced_leader[-x:] for x in
              range(args.min_sl_length, len(args.spliced_leader) + 1)]
         )
     else:
         sl_regex = '|'.join(
-            [args.spliced_leader[-x:] for x in 
+            [args.spliced_leader[-x:] for x in
              range(args.min_sl_length, len(args.spliced_leader) + 1)]
         )
 
@@ -1829,7 +1838,7 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
         "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
-    find_sequence(input_reads, 'sl', sl_filter, sl_regex, sl_build_dir, 
+    find_sequence(input_reads, 'sl', sl_filter, sl_regex, sl_build_dir,
                   sample_id, read_num)
 
     # Let Ruffus know we are done
@@ -1896,7 +1905,7 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
         "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
-    find_sequence(input_reads, 'polya', polya_filter, polya_regex, 
+    find_sequence(input_reads, 'polya', polya_filter, polya_regex,
                   polya_build_dir, sample_id, read_num, trim_direction='right')
     open(output_file, 'w').close()
 
@@ -1939,7 +1948,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
            r'\2', r'\4')
 def find_polyt_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(T) tail fragment"""
-    # Match reads with at least n T's at the beginning of the read; For now 
+    # Match reads with at least n T's at the beginning of the read; For now
     # we will always require matches to be at the beginning of the read.
     polyt_filter = 'T' * args.min_polya_length
     if args.exclude_internal_polya_matches:
@@ -1952,7 +1961,7 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
         "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
-    find_sequence(input_reads, 'polyt', polyt_filter, polyt_regex, 
+    find_sequence(input_reads, 'polyt', polyt_filter, polyt_regex,
                   polyt_build_dir, sample_id, read_num, reverse=True)
     open(output_file, 'w').close()
 
@@ -1982,7 +1991,7 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
     open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
-# Step 6: Combine coordinate output for multiple samples 
+# Step 6: Combine coordinate output for multiple samples
 #
 # Next, we create a single GFF file using the information contained in the GFF
 # files that were constructed for each sample.
