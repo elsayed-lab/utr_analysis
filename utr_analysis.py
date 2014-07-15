@@ -1103,7 +1103,7 @@ def combine_gff_results(input_gffs):
 
             # Parse gene name and description from attributes
             gene = parts[1][5:]
-            description = parts[-1]
+            description = parts[-1][12:]
 
             # Add to output dictionary
             if not chromosome in results:
@@ -1244,12 +1244,12 @@ def find_unannotated_orfs(sl, polya, orf_outfile):
         pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
     
         # TESTING 2014/06/12
-        #pickle.dump(ch, open("ch.p", "wb"))
-        #pickle.dump(sl_coords, open("sl_coords.p", "wb"))
-        #pickle.dump(polya_coords, open("polya_coords.p", "wb"))
-        #pickle.dump(genes, open("genes.p", "wb"))
-        #pickle.dump(sl, open('sl_combined.p','wb'))
-        #pickle.dump(polya, open('polya_combined.p','wb'))
+        pickle.dump(ch, open("ch.p", "wb"))
+        pickle.dump(sl_coords, open("sl_coords.p", "wb"))
+        pickle.dump(polya_coords, open("polya_coords.p", "wb"))
+        pickle.dump(genes, open("genes.p", "wb"))
+        pickle.dump(sl, open('sl_combined.p','wb'))
+        pickle.dump(polya, open('polya_combined.p','wb'))
 
         # Iterate over pairs of neighboring genes
         for i, (genea, geneb) in enumerate(pairs):
