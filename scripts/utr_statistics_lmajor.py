@@ -10,7 +10,6 @@ downstream analysis scripts by YL.
 
 Usage
 -----
-./utr_statistics.py genome.gff spliced_leader.gff polya.gff
 """
 import os
 import csv
@@ -19,19 +18,22 @@ from BCBio import GFF
 
 def main():
     """Main"""
+    if not os.path.exists('output/'):
+        os.makedirs('output')
+
     # Procyclic
     procyclic_dir = os.path.expanduser(
         '~/sl_analysis_build/lmajor-procyclic/results/minlength-4/unanchored')
 
-    sl_gff_proc = os.path.join(procyclic_dir, 'spliced_leader.gff')
-    polya_gff_proc = os.path.join(procyclic_dir, 'polya.gff')
+    sl_gff_proc = os.path.join(procyclic_dir, 'spliced_leader_sorted.gff')
+    polya_gff_proc = os.path.join(procyclic_dir, 'polya_sorted.gff')
 
     # Metacyclic
     metacyclic_dir = os.path.expanduser(
         '~/sl_analysis_build/lmajor-metacyclic/results/minlength-4/unanchored')
 
-    sl_gff_meta = os.path.join(metacyclic_dir, 'spliced_leader.gff')
-    polya_gff_meta = os.path.join(metacyclic_dir, 'polya.gff')
+    sl_gff_meta = os.path.join(metacyclic_dir, 'spliced_leader_sorted.gff')
+    polya_gff_meta = os.path.join(metacyclic_dir, 'polya_sorted.gff')
 
     # Load gene annotations
     printb("Loading Genome annotations...")
@@ -67,7 +69,7 @@ def main():
     ########################################
     # TESTING
     ########################################
-    sys.exit()
+    #sys.exit()
 
     # 3'UTR lengths
     printb("Computing 3'UTR lengths...")

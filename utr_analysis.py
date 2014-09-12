@@ -729,7 +729,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         else:
             # acceptor site at left end of read
             acceptor_site = read.pos + 1
-http://biopython.org/DIST/docs/api/Bio.SeqFeature.FeatureLocation-class.html
         # First, check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
         if is_inside_cds(chromosomes[chromosome], acceptor_site):
@@ -950,13 +949,15 @@ def find_closest_gene(chromosome, strand, feature_name, location):
         return None
 
     # Get description of closest matching gene
-    desc_qualifiers = subseq.features[closest_index].qualifiers['description']
+    try:
+        desc_qualifiers = subseq.features[closest_index].qualifiers['description']
+    except KeyError:
+        # For GFFs with no description
+        desc_qualifiers = []
 
     if len(desc_qualifiers) > 0:
         gene_description = desc_qualifiers[0]
     else:
-        # TESTING 2014/03/21 (can remove if no longer occurs)
-        print("Missing description for gene: %s" % closest_gene)
         gene_description = ""
 
     # Return details for matching gene
@@ -2048,9 +2049,9 @@ def combine_results(input_files, output_file):
         os.path.join(combined_output_dir, 'unannotated_orfs.gff')
     )
 
-    logging.info("# Checking for unannotated ORFs")
-    num_orfs = find_unannotated_orfs(sl_combined, polya_combined, orf_outfile)
-    logging.info("# Found %d unannotated ORFs" % num_orfs)
+    #logging.info("# Checking for unannotated ORFs")
+    #num_orfs = find_unannotated_orfs(sl_combined, polya_combined, orf_outfile)
+    #logging.info("# Found %d unannotated ORFs" % num_orfs)
 
 #-----------------------------------------------------------------------------
 # Run pipeline
