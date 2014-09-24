@@ -22,15 +22,15 @@ def main():
         os.makedirs('output')
 
     # Procyclic
-    procyclic_dir = os.path.expanduser(
-        '~/sl_analysis_build/lmajor-procyclic/results/minlength-4/unanchored')
+    procyclic_dir = os.path.expandvars(
+        '$SCRATCH/utr_analysis/lmajor-procyclic/results/minlength-4/unanchored')
 
     sl_gff_proc = os.path.join(procyclic_dir, 'spliced_leader_sorted.gff')
     polya_gff_proc = os.path.join(procyclic_dir, 'polya_sorted.gff')
 
     # Metacyclic
-    metacyclic_dir = os.path.expanduser(
-        '~/sl_analysis_build/lmajor-metacyclic/results/minlength-4/unanchored')
+    metacyclic_dir = os.path.expandvars(
+        '$SCRATCH/utr_analysis/lmajor-metacyclic/results/minlength-4/unanchored')
 
     sl_gff_meta = os.path.join(metacyclic_dir, 'spliced_leader_sorted.gff')
     polya_gff_meta = os.path.join(metacyclic_dir, 'polya_sorted.gff')
@@ -55,6 +55,13 @@ def main():
     polya_proc = list(GFF.parse(open(polya_gff_proc)))
     polya_meta = list(GFF.parse(open(polya_gff_meta)))
 
+    # 5' and 3' coordinates and usage
+    printb("Computing UTR coordinates & usage")
+    write_5utr_matrix(sl_proc, sl_meta, genes,
+        'output/lmajor_5UTR_proc_metac_TS_matrix.txt')
+    write_3utr_matrix(polya_proc, polya_meta, genes,
+        'output/lmajor_3UTR_proc_metac_TS_matrix.txt')
+
     # 5'UTR lengths
     printb("Computing 5'UTR lengths...")
 
@@ -65,11 +72,6 @@ def main():
     # Write combined 5'UTR lengths
     with open('output/lmajor_5UTR_lengths_all.txt', 'w') as fp:
         fp.writelines(sorted(utr5_lengths_proc + utr5_lengths_meta))
-
-    ########################################
-    # TESTING
-    ########################################
-    #sys.exit()
 
     # 3'UTR lengths
     printb("Computing 3'UTR lengths...")
@@ -153,7 +155,7 @@ def compute_5utr_lengths(sl, genes, outfile):
             gene_id = entry.qualifiers['Name'][0]
 
             # for now, only consider UTRs of known genes
-            if gene_id.startswith('ORF'):
+            if gene_id not in genes.keys():
                 continue
             gene = genes[gene_id]
 
@@ -193,7 +195,7 @@ def compute_3utr_lengths(polya, genes, outfile):
             gene_id = entry.qualifiers['Name'][0]
 
             # for now, only consider UTRs of known genes
-            if gene_id.startswith('ORF'):
+            if gene_id not in genes.keys():
                 continue
             gene = genes[gene_id]
 
@@ -227,7 +229,7 @@ def compute_alt_acceptor_site_distances(acceptor_sites, genes, outfile):
 
     for ch in acceptor_sites:
         # genes for which acceptor sites have been observed
-        gene_ids = get_covered_geneids(ch)
+        gene_ids = get_covered_geneids(ch, genes)
 
         # iterate over genes
         for gene_id in gene_ids:
@@ -280,7 +282,7 @@ def get_primary_and_minor_acceptor_site(sites):
 
     return (primary_site, minor_sites)
 
-def get_covered_geneids(ch):
+def get_covered_geneids(ch, genes):
     """Gets a list of gene IDs for which acceptor sites have been observed"""
     # first, get a list of all of the genes covered
     gene_ids = list(set([x.qualifiers['Name'][0] for x in ch.features
@@ -291,7 +293,7 @@ def get_covered_geneids(ch):
             continue
         gene_id = entry.qualifiers['Name'][0]
 
-        if gene_id.startswith('ORF'):
+        if gene_id not in genes.keys():
             continue
         gene_ids.append(gene_id)
 
@@ -343,10 +345,10 @@ def output_site_usage(genes, conda, conda_name, condb, condb_name,
         ch_num = ch_conda.id[-2:]
 
         # genes for which acceptor sites have been observed (condaylic)
-        gene_ids_conda = get_covered_geneids(ch_conda)
+        gene_ids_conda = get_covered_geneids(ch_conda, genes)
 
         # genes for which acceptor sites have been observed (condition_b)
-        gene_ids_condb = get_covered_geneids(ch_condb)
+        gene_ids_condb = get_covered_geneids(ch_condb, genes)
 
         for gene_id in gene_ids_conda:
             # if gene only covered in one condition, stop here
@@ -434,6 +436,235 @@ def output_site_usage(genes, conda, conda_name, condb, condb_name,
                     conda_minor_site_reads_conda, conda_minor_site_reads_condb
                 ])
 
+#
+# Question 4: How many reads mapped to procyclic/metacyclic for each acceptor
+#             site?
+#
+def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
+    """Generates a table with the coordinates and support for each SL acceptor
+    site in procyclic and metacyclic samples"""
+    results = {}
+
+    # Process procyclic acceptor sites
+    for ch in sl_proc:
+        for entry in ch.features:
+            # skip chromosomes
+            if entry.type == 'chromosome':
+                continue
+
+            # gene id
+            gene_id = entry.qualifiers['Name'][0]
+
+            # for now, only consider UTRs of known genes
+            if gene_id not in genes.keys():
+                continue
+            gene = genes[gene_id]
+
+            if not gene_id in results:
+                results[gene_id] = {
+                    'chromosome': ch.id[-2:],
+                    'strand': "-" if gene.strand == -1 else "+",
+                    'sites': {}
+            }
+
+            # Get score
+            score = str(entry.qualifiers['score'][0])
+
+            # Get acceptor site location
+            acceptor_site_location = entry.location.end
+
+            # otherwise get the UTR coordinates
+            if gene.strand == 1:
+                start = str(acceptor_site_location)
+                end = str(gene.location.start)
+            else:
+                start = str(gene.location.end + 1)
+                end = str(acceptor_site_location)
+
+            # add to results
+            if not start in results[gene_id]['sites']:
+                results[gene_id]['sites'][start] = {}
+            if not end in results[gene_id]['sites'][start]:
+                results[gene_id]['sites'][start][end] = {
+                    'procyclic': score,
+                    'metacyclic': '0'
+                }
+            else:
+                results[gene_id]['sites'][start][end]['procyclic'] = score
+
+    # Process metacyclic acceptor sites
+    for ch in sl_meta:
+        for entry in ch.features:
+            # skip chromosomes
+            if entry.type == 'chromosome':
+                continue
+
+            # gene id
+            gene_id = entry.qualifiers['Name'][0]
+
+            # for now, only consider UTRs of known genes
+            if gene_id not in genes.keys():
+                continue
+            gene = genes[gene_id]
+
+            if not gene_id in results:
+                results[gene_id] = {
+                    'chromosome': ch.id[-2:],
+                    'strand': "-" if gene.strand == -1 else "+",
+                    'sites': {}
+            }
+
+            # Get score
+            score = str(entry.qualifiers['score'][0])
+
+            # Get acceptor site location
+            acceptor_site_location = entry.location.end
+
+            # otherwise get the UTR length
+            if gene.strand == 1:
+                start = str(acceptor_site_location)
+                end = str(gene.location.start)
+            else:
+                start = str(gene.location.end + 1)
+                end = str(acceptor_site_location)
+
+            if not start in results[gene_id]['sites']:
+                results[gene_id]['sites'][start] = {}
+            if not end in results[gene_id]['sites'][start]:
+                results[gene_id]['sites'][start][end] = {
+                    'metacyclic': score,
+                    'procyclic': '0'
+                }
+            else:
+                results[gene_id]['sites'][start][end]['metacyclic'] = score
+
+    # save output
+    with open(outfile, 'w') as fp:
+        # write heaer
+        fp.write("\t".join(['gene', 'strand', 'chr', 'start', 'stop',
+        'procyclic', 'metacyclic']) + "\n")
+
+        # write entries
+        for gene_id,gene in results.items():
+            for start,start_site in gene['sites'].items():
+                for end,scores in start_site.items():
+                    fp.write("\t".join(
+                        [gene_id, gene['strand'], gene['chromosome'],
+                         start, end, scores['procyclic'],
+                         scores['metacyclic']]) + "\n")
+
+def write_3utr_matrix(polya_proc, polya_meta, genes, outfile):
+    """Generates a table with the coordinates and support for each SL acceptor
+    site in procyclic and metacyclic samples"""
+    results = {}
+
+    # Process procyclic acceptor sites
+    for ch in polya_proc:
+        for entry in ch.features:
+            # skip chromosomes
+            if entry.type == 'chromosome':
+                continue
+
+            # gene id
+            gene_id = entry.qualifiers['Name'][0]
+
+            # for now, only consider UTRs of known genes
+            if gene_id not in genes.keys():
+                continue
+            gene = genes[gene_id]
+
+            if not gene_id in results:
+                results[gene_id] = {
+                    'chromosome': ch.id[-2:],
+                    'strand': "-" if gene.strand == -1 else "+",
+                    'sites': {}
+            }
+
+            # Get score
+            score = str(entry.qualifiers['score'][0])
+
+            # Get acceptor site location
+            acceptor_site_location = entry.location.end
+
+            # otherwise get the UTR coordinates
+            if gene.strand == 1:
+                start = str(gene.location.end + 1)
+                end = str(acceptor_site_location)
+            else:
+                start = str(acceptor_site_location)
+                end = str(gene.location.start)
+
+            # add to results
+            if not start in results[gene_id]['sites']:
+                results[gene_id]['sites'][start] = {}
+            if not end in results[gene_id]['sites'][start]:
+                results[gene_id]['sites'][start][end] = {
+                    'procyclic': score,
+                    'metacyclic': '0'
+                }
+            else:
+                results[gene_id]['sites'][start][end]['procyclic'] = score
+
+    # Process metacyclic acceptor sites
+    for ch in polya_meta:
+        for entry in ch.features:
+            # skip chromosomes
+            if entry.type == 'chromosome':
+                continue
+
+            # gene id
+            gene_id = entry.qualifiers['Name'][0]
+
+            # for now, only consider UTRs of known genes
+            if gene_id not in genes.keys():
+                continue
+            gene = genes[gene_id]
+
+            if not gene_id in results:
+                results[gene_id] = {
+                    'chromosome': ch.id[-2:],
+                    'strand': "-" if gene.strand == -1 else "+",
+                    'sites': {}
+            }
+
+            # Get score
+            score = str(entry.qualifiers['score'][0])
+
+            # Get acceptor site location
+            acceptor_site_location = entry.location.end
+
+            # otherwise get the UTR coordinates
+            if gene.strand == 1:
+                start = str(gene.location.end + 1)
+                end = str(acceptor_site_location)
+            else:
+                start = str(acceptor_site_location)
+                end = str(gene.location.start)
+
+            if not start in results[gene_id]['sites']:
+                results[gene_id]['sites'][start] = {}
+            if not end in results[gene_id]['sites'][start]:
+                results[gene_id]['sites'][start][end] = {
+                    'metacyclic': score,
+                    'procyclic': '0'
+                }
+            else:
+                results[gene_id]['sites'][start][end]['metacyclic'] = score
+
+    # save output
+    with open(outfile, 'w') as fp:
+        # write heaer
+        fp.write("\t".join(['gene', 'strand', 'chr', 'start', 'stop',
+        'procyclic', 'metacyclic']) + "\n")
+
+        # write entries
+        for gene_id,gene in results.items():
+            for start,start_site in gene['sites'].items():
+                for end,scores in start_site.items():
+                    fp.write("\t".join(
+                        [gene_id, gene['strand'], gene['chromosome'],
+                         start, end, scores['procyclic'],
+                         scores['metacyclic']]) + "\n")
 """
 MAIN
 """
