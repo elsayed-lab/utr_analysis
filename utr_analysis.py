@@ -39,6 +39,7 @@ import random
 import logging
 import argparse
 import datetime
+import distance
 import StringIO
 import textwrap
 import warnings
@@ -410,7 +411,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         Filepath to a FASTQ file containing reads to scan.
     feature_name: str
         Type of feature being searched for; used in naming filing and
-        directories and in choosing logs to write to. [sl|polya|polyt]
+        directories and in choosing logs to write to. [sl|rsl|polya|polyt]
     sequence_filter: str
         A short sequence string used for initial filtering. All reads will be
         checked to see if it contains this string, and those that do will be
@@ -501,6 +502,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
         # ignore any reads that don't contain at least the smallest part of
         # the sequence of interest
+        # this just speeds up the search so we don't have to use regex on all
+        # reads
         if sequence_filter not in read[SEQUENCE_IDX]:
             continue
 
@@ -722,13 +725,20 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         # SL/Poly(A) acceptor site location
         if ((strand == '+' and feature_name == 'polya') or
+            (strand == '+' and feature_name == 'rsl') or
             (strand == '-' and feature_name == 'polyt') or
             (strand == '-' and feature_name == 'sl')):
             # acceptor site at right end of read
-            acceptor_site = read.pos + read.rlen - 1
+
+            # 2014/10/04
+            #acceptor_site = read.pos + read.rlen - 1
+            acceptor_site = read.pos + read.rlen + 1
         else:
             # acceptor site at left end of read
-            acceptor_site = read.pos + 1
+
+            # 2014/10/04
+            #acceptor_site = read.pos + 1
+            acceptor_site = read.pos
         # First, check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
         if is_inside_cds(chromosomes[chromosome], acceptor_site):
@@ -736,6 +746,11 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             num_inside_cds = num_inside_cds + 1
             continue
 
+
+        # More rigorous filtering
+        # Here we will check to make sure that the trimmed portion of the read
+        # (the putative SL or Poly(A) fragment) is different from what is at
+        # the genome at the same location.
         if feature_name in ['polya', 'polyt']:
             # Count number of A's / T's just downstream of acceptor site
             if ((feature_name == 'polya' and strand == '+') or
@@ -745,39 +760,68 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 # reads, and also Poly(T) reads on the negative strand
                 # (original read has T's at front, but maps to location with
                 # A's at the end).
-                #
-                # The sequence record generated will contain the same number of
-                # bases as the matched feature fragment since that is all that
-                # is needed for this check.
-                rec = chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length]
 
-                # Make sure that read contained at least one more A than is
-                # found in the genome at mapped location
-                # if rec.seq.count('A') >= feature_length:
-                #if not feature_length >= rec.seq.count('A') + 3:
-                #    continue
-                genomic_count = re.match("^A*", str(rec.seq)).end()
-                if not feature_length > genomic_count:
-                    continue
+                # region in genome correspond to trimmed part of the read;
+                # i.e. the region just before mapped read
+                genome_seq = str(chr_sequences[chromosome][read.pos + read.rlen:
+                                                read.pos + read.rlen +
+                                                feature_length])
 
+                feature_fragment = "A" * feature_length
+
+                # get trimmed portion from right of untrimmed read
+                trimmed_portion = str(untrimmed_read.seq[-feature_length:]),
             else:
-                # Check for T's at right end of read
-                rec = chr_sequences[chromosome][read.pos - feature_length:read.pos]
+                # grab region just before mapped read
+                genome_seq = str(chr_sequences[chromosome][read.pos -
+                                                    feature_length:read.pos])
+                feature_fragment = "T" * feature_length
 
-                # Make sure that read contained at least one more T than is
-                # found in the genome at mapped location
-                #if not feature_length >= rec.seq.count('T') + 3:
-                #    continue
-                genomic_count = re.match("^T*", str(rec.seq[::-1])).end()
-                if not feature_length > genomic_count:
-                    continue
+                # get trimmed portion from left of read
+                trimmed_portion = str(untrimmed_read.seq[:feature_length]),
         else:
-            # Perform a similar check for the SL on the positive strand
-            rec = chr_sequences[chromosome][read.pos - feature_length:
-                                            read.pos]
-            # check for exact match
-            if args.spliced_leader[-len(rec):] == str(rec.seq):
-                continue
+            # Perform a similar check for the SL sequence
+            if ((feature_name == 'sl' and strand == '+') or
+                (feature_name == 'rsl' and strand == '-')):
+                # grab region just before mapped read
+                genome_seq = str(
+                    chr_sequences[chromosome][read.pos - feature_length:read.pos]
+                )
+
+                feature_fragment = args.spliced_leader[-feature_length:]
+
+                # get trimmed portion from left of read
+                trimmed_portion = str(untrimmed_read.seq[:feature_length]),
+            else:
+                # grab region just after mapped untrimmed read
+                genome_seq = str(chr_sequences[chromosome][read.pos + read.rlen:
+                                                           read.pos + read.rlen + feature_length])
+                feature_fragment = reverse_sl[:feature_length]
+
+                # get trimmed portion from right of untrimmed read
+                trimmed_portion = str(untrimmed_read.seq[-feature_length:]),
+
+        import pdb; pdb.set_trace()
+
+        # 1) If trimmed portion is identical to what is in the genome,
+        # this is a false hit.
+        #
+        # Example: read with portion that is similar to SL sequence,
+        # but was unmapped initially because of errors downstream of
+        # SL sequence (e.g. four bases from SL at left of read, error
+        # downstream)
+        if feature_fragment == genome_seq:
+            continue
+
+        # 2) If trimmed portion is very similar to genome, but very
+        #    different from the SL, it is also a false hit
+        # Example: Read which maps to a part of the genome with
+        # similarity to SL, but contains an error upstream of the SL
+        # sequence (e.g. four bases of SL in middle of read with error
+        # in region upstream preventing exact match to genome)
+        if (distance.hamming(trimmed_portion, genome_seq) <
+            distance.hamming(trimmed_portion, feature_fragment)):
+            continue
 
         # Find nearest gene
         gene = find_closest_gene(chromosomes[chromosome], strand, feature_name,
@@ -1134,62 +1178,6 @@ def combine_gff_results(input_gffs):
     # Return combined results
     return results
 
-def find_orfs(seq, min_protein_length, strand=1, trans_table=1):
-    """
-    Finds ORFs of a specified minimum length in a SeqRecord.
-
-    Based on: http://biopython.org/DIST/docs/tutorial/Tutorial.html#sec360
-    """
-    answer = []
-    seq_len = len(seq)
-
-    # Get sequence associated with the specified location and strand
-    if strand == 1:
-        dna_seq = seq
-    else:
-        dna_seq = seq.reverse_complement()
-
-    for frame in range(3):
-        trans = str(dna_seq[frame:].translate(trans_table))
-        trans_len = len(trans)
-        aa_start = 0
-        aa_end = 0
-
-        # Iterate through ORFS in reading frame
-        while aa_start < trans_len:
-            # Set end counter to position of next stop codon
-            aa_start = trans.find("M", aa_start)
-            aa_end = trans.find("*", aa_start)
-
-            # If no start or stop codons found, stop here
-            if aa_start == -1 or aa_end == -1:
-                break
-
-            # extend stop codon until ORF is of sufficient length
-            while (aa_end - aa_start < min_protein_length) and aa_end > -1:
-                aa_end = trans.find("*", aa_end + 1)
-
-            # If no ORFs of sufficent size found, stop here
-            if aa_end == -1:
-                break
-
-            # Compute coordinates of ORF
-            if strand == 1:
-                start = frame + aa_start * 3
-                end = min(seq_len, frame + aa_end * 3 + 3)
-            else:
-                start = seq_len - frame - aa_end * 3 - 3
-                end = seq_len - frame - aa_start * 3
-
-            # Add to output
-            str_strand = "+" if strand == 1 else '-'
-            answer.append((start, end, str_strand))
-
-            # increment start counter and continue
-            aa_start = aa_end + 1
-    answer.sort()
-    return answer
-
 def load_annotations():
     """Loads genome annotations from specified GFF(s)."""
     # Get chromosomes from GFF file
@@ -1215,208 +1203,6 @@ def load_annotations():
 
     return chromosomes
 
-def find_unannotated_orfs(sl, polya, orf_outfile):
-    """
-    Searches through matched SL and Poly(A) acceptor sites and attempts to
-    find potential unannotated ORFs in long UTRs.
-
-    TODO: check ends of chromosomes.
-    """
-    # Get chromosomes from GFF file
-    chromosomes = load_annotations()
-
-    # Output dictionary
-    results = {}
-
-    # Keep track of number of new ORFs found
-    num_orfs = 0
-
-    # TESTING 2014/06/12
-    import pickle
-
-    for chnum in chromosomes:
-        ch = chromosomes[chnum]
-
-        results[chnum] = []
-
-        # Load SL and Poly(A) coords
-        sl_coords = sl[chnum]
-        polya_coords = polya[chnum]
-
-        # Search positive and negative strand separately
-
-        # positive strand
-        genes = [x for x in ch.features if x.type in ['gene', 'ORF']
-                   and x.strand == 1]
-        genes.sort(key=lambda k: k.location.start)
-
-        # ordered pairs of genes
-        pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
-
-        # TESTING 2014/06/12
-        pickle.dump(ch, open("ch.p", "wb"))
-        pickle.dump(sl_coords, open("sl_coords.p", "wb"))
-        pickle.dump(polya_coords, open("polya_coords.p", "wb"))
-        pickle.dump(genes, open("genes.p", "wb"))
-        pickle.dump(sl, open('sl_combined.p','wb'))
-        pickle.dump(polya, open('polya_combined.p','wb'))
-
-        # Iterate over pairs of neighboring genes
-        for i, (genea, geneb) in enumerate(pairs):
-            # Gene names
-            a = genea.id
-            b = geneb.id
-
-            # 1) Check for Poly(A) coords for gene A and SL coords for gene B
-            if (a not in polya_coords) or (b not in sl_coords):
-                continue
-
-            # 2) Make sure genes are not from separate polycistronic
-            #    transcriptional units (PTUs).
-            #    25000 is much larger than what we would expect for intergenic
-            #    regions on a PTU, but small enough to exclude genes from
-            #    different PTUs.
-            if (geneb.location.start - genea.location.end) > 25000:
-                continue
-
-            # Find nearest SL/Poly(A) acceptor sites; these are reserved
-            # for the original annotated genes
-            genea_nearest_polya = min(int(x) for x in polya_coords[a].keys())
-            geneb_nearest_sl = max(int(x) for x in sl_coords[b].keys())
-
-            # Get list of eligible Poly(A) acceptor sites for gene A and spliced
-            # leader acceptor sites for gene B.
-            genea_polya_sites = {k:polya_coords[a][k] for k in polya_coords[a].keys()
-                                    if ((int(k) > genea_nearest_polya) and
-                                        (int(k) < geneb_nearest_sl))}
-            geneb_sl_sites = {k:sl_coords[b][k] for k in sl_coords[b].keys()
-                                if ((int(k) < geneb_nearest_sl) and
-                                    (int(k) > genea_nearest_polya))}
-
-            # 3) Make sure there is at least one "free" Poly(A) acceptor sites
-            #    associated with gene A and one free SL acceptor site associated
-            #    with gene B.
-            if (len(genea_polya_sites) == 0) or (len(geneb_sl_sites) == 0):
-                continue
-
-            # 4) Find furtherest remaining acceptor sites from each gene and
-            #    check to see if the SL site is upstream of the Poly(A) site.
-            genea_furthest_polya = max(int(x) for x in genea_polya_sites.keys())
-            geneb_furthest_sl = min(int(x) for x in geneb_sl_sites.keys())
-
-
-            if genea_furthest_polya < geneb_furthest_sl:
-                continue
-
-            # 5) Check for ORF of minimum required size
-            if (genea_furthest_polya - geneb_furthest_sl) < 180:
-                continue
-
-            seq = ch[geneb_furthest_sl + 2:genea_furthest_polya].seq
-            orfs = find_orfs(seq, 60, strand=1)
-
-            # No ORFs of required size found
-            if len(orfs) == 0:
-                continue
-
-            # If all checks were passed, add ORF closest to SL acceptor site;
-            # arbitrary but will serve as a placeholder to be refined in the
-            # future
-            first_orf = (orfs[0][0] + geneb_furthest_sl + 1,
-                         orfs[0][1] + geneb_furthest_sl + 1, orfs[0][2])
-
-            results[chnum].append(first_orf)
-            num_orfs = num_orfs + 1
-
-        # negative strand
-        genes = [x for x in ch.features if x.type in ['gene', 'ORF']
-                    and x.strand == -1]
-        genes.sort(key=lambda k: k.location.start)
-
-        # ordered pairs of genes
-        pairs = [(genes[i], genes[i+1]) for i in range(0, len(genes) - 1)]
-
-        # Iterate over pairs of neighboring genes
-        for i, (genea, geneb) in enumerate(pairs):
-            # Gene names
-            a = genea.id
-            b = geneb.id
-
-            # 1) Check for Poly(A) coords for gene B and SL coords for gene A
-            if (b not in polya_coords) or (a not in sl_coords):
-                continue
-
-            # 2) Make sure genes are not from separate polycistronic
-            #    transcriptional units (PTUs).
-            #    25000 is much larger than what we would expect for intergenic
-            #    regions on a PTU, but small enough to exclude genes from
-            #    different PTUs.
-            if (geneb.location.start - genea.location.end) > 25000:
-                continue
-
-            # Find nearest SL/Poly(A) acceptor sites
-            geneb_nearest_polya = max(int(x) for x in polya_coords[b].keys())
-            genea_nearest_sl = min(int(x) for x in sl_coords[a].keys())
-
-            # Get list of eligible Poly(A) acceptor sites for gene B and spliced
-            # leader acceptor sites for gene A
-            geneb_polya_sites = {k:polya_coords[b][k] for k in polya_coords[b].keys()
-                                    if ((int(k) < geneb_nearest_polya) and
-                                        (int(k) > genea_nearest_sl))}
-            genea_sl_sites = {k:sl_coords[a][k] for k in sl_coords[a].keys()
-                                if ((int(k) > genea_nearest_sl) and
-                                    (int(k) < geneb_nearest_polya))}
-
-            # 3) Make sure there is at least one "free" Poly(A) acceptor sites
-            #    associated with gene B and one free SL acceptor site associated
-            #    with gene A.
-            if (len(geneb_polya_sites) == 0) or (len(genea_sl_sites) == 0):
-                continue
-
-            # 4) Find furtherest remaining acceptor sites from each gene and
-            #    check to see if the SL site is upstream of the Poly(A) site.
-            geneb_furthest_polya = min(int(x) for x in geneb_polya_sites.keys())
-            genea_furthest_sl = max(int(x) for x in genea_sl_sites.keys())
-
-            if geneb_furthest_polya > genea_furthest_sl:
-                continue
-
-            # 5) Check for ORF of minimum required size
-            if (genea_furthest_sl - geneb_furthest_polya) < 180:
-                continue
-
-            seq = ch[geneb_furthest_polya + 2:genea_furthest_sl].seq
-            orfs = find_orfs(seq, 60, strand=-1)
-
-            # No ORFs of required size found
-            if len(orfs) == 0:
-                continue
-
-            # If all checks were passed, add ORF closest to SL acceptor site;
-            # arbitrary but will serve as a placeholder to be refined in the
-            # future
-            first_orf = (orfs[-1][0] + geneb_furthest_polya + 1,
-                         orfs[-1][1] + geneb_furthest_polya + 1, orfs[-1][2])
-            # TESTING
-            #if a == 'LmjF.01.0010':
-            #    import pdb; pdb.set_trace()
-
-            results[chnum].append(first_orf)
-            num_orfs = num_orfs + 1
-
-        # Add ORFs found on previous iterations to results
-        if args.uorf_gff:
-            orfs = [x for x in ch.features if x.type == 'ORF']
-            orfs.sort(key=lambda k: k.location.start)
-
-            for orf in orfs:
-                results[chnum].append((orf.location.start, orf.location.end,
-                                       orf.strand))
-
-    # save output
-    output_unannotated_orfs(results, orf_outfile)
-
-    return num_orfs
 #--------------------------------------
 # Main
 #--------------------------------------
@@ -1431,8 +1217,12 @@ shared_build_dir = os.path.join(args.build_directory, 'common')
 combined_output_dir = os.path.join(
     args.build_directory,
     'results',
-    'minlength-%d' % args.min_sl_length,
-    'anchored' if args.exclude_internal_sl_matches else 'unanchored'
+    'sl-min%d%s_polya-min%d%s' % (
+        args.min_sl_length,
+        '-anchored' if args.exclude_internal_sl_matches else '',
+        args.min_polya_length,
+        '-anchored' if args.exclude_internal_polya_matches else ''
+    )
 )
 if not os.path.exists(combined_output_dir):
     os.makedirs(combined_output_dir, mode=0o755)
@@ -1443,6 +1233,14 @@ if not os.path.exists(combined_output_dir):
 sl_build_dir = os.path.join(
     args.build_directory,
     'spliced_leader',
+    'minlength-%d' % args.min_sl_length,
+    'anchored' if args.exclude_internal_sl_matches else 'unanchored'
+)
+
+# Reverse SL sub-directory
+rsl_build_dir = os.path.join(
+    args.build_directory,
+    'reverse_spliced_leader',
     'minlength-%d' % args.min_sl_length,
     'anchored' if args.exclude_internal_sl_matches else 'unanchored'
 )
@@ -1462,6 +1260,9 @@ polyt_build_dir = os.path.join(
     'minlength-%d' % args.min_polya_length,
     'anchored' if args.exclude_internal_polya_matches else 'unanchored'
 )
+
+# Create a reversed version of the SL sequence
+reverse_sl = str(Seq.Seq(args.spliced_leader).reverse_complement())
 
 # Get a list of sample ids ids
 # @TODO: Generalize handling of sample ids
@@ -1502,7 +1303,8 @@ for sample_id in sample_ids:
             os.makedirs(outdir, mode=0o755)
 
     # parameter- and feature-specific directories
-    for base_dir in [sl_build_dir, polya_build_dir, polyt_build_dir]:
+    for base_dir in [sl_build_dir, rsl_build_dir, 
+                     polya_build_dir, polyt_build_dir]:
         for sub_dir in ['fastq/filtered', 'fastq/unfiltered',
                         'results', 'ruffus', 'log', 'tophat']:
             outdir = os.path.join(base_dir, sample_id, sub_dir)
@@ -1544,12 +1346,14 @@ loggers = {}
 for sample_id in sample_ids_all:
     loggers[sample_id] = {}
 
-    for analysis in ['sl', 'polya', 'polyt']:
+    for analysis in ['sl', 'rsl', 'polya', 'polyt']:
         loggers[sample_id][analysis] = {}
 
         for read_num in ['R1', 'R2']:
             if analysis == 'sl':
                 bdir = sl_build_dir
+            elif analysis == 'rsl':
+                bdir = rsl_build_dir
             elif analysis == 'polya':
                 bdir = polya_build_dir
             else:
@@ -1881,13 +1685,68 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 
 
 #-----------------------------------------------------------------------------
+# Reverse SL analysis
+#-----------------------------------------------------------------------------
+
+#
+# Reverse SL Step 1
+#
+@follows(compute_sl_coordinates)
+@transform(args.input_reads,
+           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           r'%s/\2/ruffus/\2_\4.find_rsl_reads' % rsl_build_dir,
+           r'\2', r'\4')
+def find_rsl_reads(input_file, output_file, sample_id, read_num):
+    """Matches reads with possible Poly(A) tail fragment"""
+    rsl_filter = 'A' * args.min_rsl_length
+
+    if args.exclude_internal_rsl_matches:
+        rsl_regex = 'A{%d,}$' % (args.min_rsl_length)
+    else:
+        rsl_regex = 'A{%d,}' % (args.min_rsl_length)
+
+    # input reads
+    input_reads = os.path.join(
+        shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
+        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
+
+    find_sequence(input_reads, 'rsl', rsl_filter, rsl_regex,
+                  rsl_build_dir, sample_id, read_num, trim_direction='right')
+    open(output_file, 'w').close()
+
+#
+# Poly(A) Step 2
+#
+@transform(find_rsl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_rsl_reads'),
+           r'\1/\2_\3.map_rsl_reads',
+           r'\2', r'\3')
+def map_rsl_reads(input_file, output_file, sample_id, read_num):
+    """Maps the filtered poly-adenylated reads back to the genome"""
+    map_reads('rsl', rsl_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#
+# Poly(A) Step 3
+#
+@transform(map_rsl_reads,
+           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_rsl_reads'),
+           r'\1/\2_\3.compute_rsl_coordinates',
+           r'\2', r'\3')
+def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
+    logging.info(
+        "# Computing coordinates for mapped rsldenylation events [A]")
+    compute_coordinates('rsl', rsl_build_dir, sample_id, read_num)
+    open(output_file, 'w').close()
+
+#-----------------------------------------------------------------------------
 # Poly(A) Analysis
 #-----------------------------------------------------------------------------
 
 #
 # Poly(A) Step 1
 #
-@follows(compute_sl_coordinates)
+@follows(compute_rsl_coordinates)
 @transform(args.input_reads,
            regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
@@ -2011,9 +1870,15 @@ def combine_results(input_files, output_file):
     sl_gffs = []
     for infile in input_files:
         (sample_id, read_num) = re.match(regex, infile).groups()
-        gff = "%s/%s/results/sl_coordinates_%s.gff" % (
+        # SL
+        gff1 = "%s/%s/results/sl_coordinates_%s.gff" % (
                  sl_build_dir, sample_id, read_num)
-        sl_gffs.append(gff)
+        sl_gffs.append(gff1)
+
+        # Reverse SL
+        gff2 = "%s/%s/results/rsl_coordinates_%s.gff" % (
+                 rsl_build_dir, sample_id, read_num)
+        sl_gffs.append(gff2)
 
     sl_outfile = os.path.join(combined_output_dir, 'spliced_leader.gff')
     sl_combined = combine_gff_results(sl_gffs)
@@ -2042,16 +1907,6 @@ def combine_results(input_files, output_file):
     output_coordinates(sl_combined, 'sl', sl_outfile, track_color='83,166,156')
     output_coordinates(polya_combined, 'polya', polya_outfile,
                        track_color='166,83,93')
-
-    # If no new ORFs were found on this iteration, mark coordinate-related
-    # tasks as completed.
-    orf_outfile = get_next_file_name(
-        os.path.join(combined_output_dir, 'unannotated_orfs.gff')
-    )
-
-    #logging.info("# Checking for unannotated ORFs")
-    #num_orfs = find_unannotated_orfs(sl_combined, polya_combined, orf_outfile)
-    #logging.info("# Found %d unannotated ORFs" % num_orfs)
 
 #-----------------------------------------------------------------------------
 # Run pipeline
