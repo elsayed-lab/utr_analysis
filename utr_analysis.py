@@ -121,6 +121,10 @@ def parse_input():
     parser.add_argument('-w', '--window-size', default=15000, type=int,
                         help=('Number of bases up or downstream of feature to'
                               'scan for related genes (default=15000)'))
+    parser.add_argument('-x', '--minimum-differences', default=2, type=int,
+                        help=('Minimum number of differences from genomic '
+                              ' sequence for a hit to be considered real. '
+                              '(default=2)'))
     parser.add_argument('--num-threads', default=4, type=int,
                         help='Number of threads to use.')
 
@@ -719,89 +723,123 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         chromosome = sam.getrname(read.tid)
         strand = "-" if read.is_reverse else "+"
 
+        # If feature was mapped on opposite strand, skip (will be explicitly
+        # detected in the complementary search
+        if ((feature_name == 'sl' and strand == '-') or
+            (feature_name == 'rsl' and strand == '+') or
+            (feature_name == 'polya' and strand == '-') or
+            (feature_name == 'polyt' and strand == '+')):
+            continue
+
         # Length of matched SL suffix or number of A's/T's
         untrimmed_read = untrimmed_reads[read.qname][read_num]
+
+        # NOTE: this may be larger than the SL sequence length if unanchored
+        # matches are allowed
         feature_length = untrimmed_read.rlen - read.rlen
 
-        # SL/Poly(A) acceptor site location
-        if ((strand == '+' and feature_name == 'polya') or
-            (strand == '+' and feature_name == 'rsl') or
-            (strand == '-' and feature_name == 'polyt') or
-            (strand == '-' and feature_name == 'sl')):
-            # acceptor site at right end of read
-
+        # Acceptor site at right end of read
+        if ((feature_name == 'polya') or (feature_name == 'rsl')):
             # 2014/10/04
             #acceptor_site = read.pos + read.rlen - 1
             acceptor_site = read.pos + read.rlen + 1
         else:
             # acceptor site at left end of read
-
             # 2014/10/04
             #acceptor_site = read.pos + 1
             acceptor_site = read.pos
-        # First, check to make sure the acceptor site does not fall within
-        # a known CDS: if it does, save to a separate file to look at later
-        if is_inside_cds(chromosomes[chromosome], acceptor_site):
-            inside_cds.writerow([read.qname, chromosome, strand, acceptor_site])
-            num_inside_cds = num_inside_cds + 1
-            continue
 
+        # Determine sequences of the trimmed portion of the read, the sequence
+        # for the region in the genome that was trimmed, and the relevant
+        # portion of SL/Poly(A) of same length and orientation as the putative
+        # feature
 
-        # More rigorous filtering
+        # QUESTION 2014/10/04
+        # Does SL match need to be extended to include part of genome in
+        # similar way to Poly(A)?
+
+        #
+        # Feature on left of read
+        #
+        if feature_name in ['sl', 'polyt']:
+            # Grab region just before mapped read
+            genome_seq = str(
+                chr_sequences[chromosome][read.pos -
+                    feature_length:read.pos].seq
+            )
+
+            # get trimmed portion from left of read
+            trimmed_portion = str(untrimmed_read.seq[:feature_length])
+
+            # SPLICED LEADER
+            if feature_name == 'sl':
+                feature_fragment = args.spliced_leader[-feature_length:]
+
+                # Shorten to size of feature if necessary
+                if len(trimmed_portion) > len(args.spliced_leader):
+                    genome_seq = genome_seq[-len(args.spliced_leader):]
+                    trimmed_portion = trimmed_portion[-len(args.spliced_leader):]
+
+            # POLY(T)
+            elif feature_name == 'polyt':
+                # grab region just before mapped read
+                feature_fragment = "T" * feature_length
+
+                # Extend detected read to include any T's present in the genome
+                # that were trimmed off
+                match = re.search('T*$', genome_seq)
+                overlap_length = match.end() - match.start()
+
+                if overlap_length > 0:
+                    # give back some T's and update the relevant sequences
+                    acceptor_site = acceptor_site - overlap_length
+                    feature_length = feature_length - overlap_length
+                    #genome_seq = (genome_seq[(2 * overlap_length):] + 
+                    #    "T" * overlap_length)
+                    genome_seq = genome_seq[:-overlap_length]
+                    trimmed_portion = trimmed_portion[:-overlap_length]
+                    feature_fragment = "T" * feature_length
+        #
+        # Feature on right of read
+        #
+        elif feature_name in ['polya', 'rsl']:
+            # Grab region just after mapped untrimmed read
+            genome_seq = str(chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length].seq)
+            # Get trimmed portion from right of untrimmed read
+            trimmed_portion = str(untrimmed_read.seq[-feature_length:])
+
+            # REVERSE SPLICED LEADER
+            if feature_name == 'rsl':
+                feature_fragment = reverse_sl[:feature_length]
+
+                # Shorten to size of feature if necessary
+                if len(trimmed_portion) > len(args.spliced_leader):
+                    genome_seq = genome_seq[:len(args.spliced_leader)]
+                    trimmed_portion = trimmed_portion[:len(args.spliced_leader)]
+
+            # POLY(A)
+            elif feature_name == 'polya':
+                feature_fragment = "A" * feature_length
+
+                # Extend detected read to include any A's present in the genome
+                # that were trimmed off
+                match = re.search('^A*', genome_seq)
+                overlap_length = match.end() - match.start()
+
+                if overlap_length > 0:
+                    # give back some A's and update the relevant sequences
+                    acceptor_site = acceptor_site + overlap_length
+                    feature_length = feature_length - overlap_length
+                    genome_seq = genome_seq[overlap_length:]
+                    trimmed_portion = trimmed_portion[overlap_length:]
+                    #genome_seq = ("A" * overlap_length +
+                    #    genome_seq[:(-overlap_length * 2)])
+                    feature_fragment = "A" * feature_length
+
+        # More filtering
         # Here we will check to make sure that the trimmed portion of the read
         # (the putative SL or Poly(A) fragment) is different from what is at
         # the genome at the same location.
-        if feature_name in ['polya', 'polyt']:
-            # Count number of A's / T's just downstream of acceptor site
-            if ((feature_name == 'polya' and strand == '+') or
-                (feature_name == 'polyt' and strand == '-')):
-                # Check for A's at right end of read
-                # This is what we expect for either positive-strand Poly(A)
-                # reads, and also Poly(T) reads on the negative strand
-                # (original read has T's at front, but maps to location with
-                # A's at the end).
-
-                # region in genome correspond to trimmed part of the read;
-                # i.e. the region just before mapped read
-                genome_seq = str(chr_sequences[chromosome][read.pos + read.rlen:
-                                                read.pos + read.rlen +
-                                                feature_length])
-
-                feature_fragment = "A" * feature_length
-
-                # get trimmed portion from right of untrimmed read
-                trimmed_portion = str(untrimmed_read.seq[-feature_length:]),
-            else:
-                # grab region just before mapped read
-                genome_seq = str(chr_sequences[chromosome][read.pos -
-                                                    feature_length:read.pos])
-                feature_fragment = "T" * feature_length
-
-                # get trimmed portion from left of read
-                trimmed_portion = str(untrimmed_read.seq[:feature_length]),
-        else:
-            # Perform a similar check for the SL sequence
-            if ((feature_name == 'sl' and strand == '+') or
-                (feature_name == 'rsl' and strand == '-')):
-                # grab region just before mapped read
-                genome_seq = str(
-                    chr_sequences[chromosome][read.pos - feature_length:read.pos]
-                )
-
-                feature_fragment = args.spliced_leader[-feature_length:]
-
-                # get trimmed portion from left of read
-                trimmed_portion = str(untrimmed_read.seq[:feature_length]),
-            else:
-                # grab region just after mapped untrimmed read
-                genome_seq = str(chr_sequences[chromosome][read.pos + read.rlen:
-                                                           read.pos + read.rlen + feature_length])
-                feature_fragment = reverse_sl[:feature_length]
-
-                # get trimmed portion from right of untrimmed read
-                trimmed_portion = str(untrimmed_read.seq[-feature_length:]),
-
-        import pdb; pdb.set_trace()
 
         # 1) If trimmed portion is identical to what is in the genome,
         # this is a false hit.
@@ -810,7 +848,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # but was unmapped initially because of errors downstream of
         # SL sequence (e.g. four bases from SL at left of read, error
         # downstream)
-        if feature_fragment == genome_seq:
+        if (feature_fragment == genome_seq) or (genome_seq == trimmed_portion):
             continue
 
         # 2) If trimmed portion is very similar to genome, but very
@@ -819,8 +857,32 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # similarity to SL, but contains an error upstream of the SL
         # sequence (e.g. four bases of SL in middle of read with error
         # in region upstream preventing exact match to genome)
-        if (distance.hamming(trimmed_portion, genome_seq) <
-            distance.hamming(trimmed_portion, feature_fragment)):
+        try:
+            dist1 = distance.hamming(trimmed_portion, genome_seq)
+            dist2 = distance.hamming(trimmed_portion, feature_fragment)
+
+            if (dist1 < dist2):
+                continue
+
+            # 3) Make sure there are at least x differences between the trimmed
+            # portion of the read and what is at the relevant locatio in the
+            # genome for the read to be considered real.
+            if (dist1 < args.minimum_differences):
+                continue
+        except:
+            # occurs when sl is smaller than genome/trimed_portion
+            # TESTING
+            print("Genome: " + genome_seq)
+            print("Trimmed: " + trimmed_portion)
+            print("Feature: " + feature_fragment)
+            import pdb; pdb.set_trace()
+            continue
+
+        # Check to make sure the acceptor site does not fall within
+        # a known CDS: if it does, save to a separate file to look at later
+        if is_inside_cds(chromosomes[chromosome], acceptor_site):
+            inside_cds.writerow([read.qname, chromosome, strand, acceptor_site])
+            num_inside_cds = num_inside_cds + 1
             continue
 
         # Find nearest gene
@@ -1217,11 +1279,12 @@ shared_build_dir = os.path.join(args.build_directory, 'common')
 combined_output_dir = os.path.join(
     args.build_directory,
     'results',
-    'sl-min%d%s_polya-min%d%s' % (
+    'sl-min%d%s_polya-min%d%s_mindiff-%d' % (
         args.min_sl_length,
         '-anchored' if args.exclude_internal_sl_matches else '',
         args.min_polya_length,
-        '-anchored' if args.exclude_internal_polya_matches else ''
+        '-anchored' if args.exclude_internal_polya_matches else '',
+        args.minimum_differences
     )
 )
 if not os.path.exists(combined_output_dir):
@@ -1233,32 +1296,44 @@ if not os.path.exists(combined_output_dir):
 sl_build_dir = os.path.join(
     args.build_directory,
     'spliced_leader',
-    'minlength-%d' % args.min_sl_length,
-    'anchored' if args.exclude_internal_sl_matches else 'unanchored'
+    'minlength%d%s_mindiff-%d' % (
+        args.min_sl_length,
+        '-anchored' if args.exclude_internal_sl_matches else '',
+        args.minimum_differences
+    )
 )
 
 # Reverse SL sub-directory
 rsl_build_dir = os.path.join(
     args.build_directory,
     'reverse_spliced_leader',
-    'minlength-%d' % args.min_sl_length,
-    'anchored' if args.exclude_internal_sl_matches else 'unanchored'
+    'minlength%d%s_mindiff-%d' % (
+        args.min_sl_length,
+        '-anchored' if args.exclude_internal_sl_matches else '',
+        args.minimum_differences
+    )
 )
 
 # Poly(A) tail sub-directory
 polya_build_dir = os.path.join(
     args.build_directory,
     'poly-a',
-    'minlength-%d' % args.min_polya_length,
-    'anchored' if args.exclude_internal_polya_matches else 'unanchored'
+    'minlength%d%s_mindiff-%d' % (
+        args.min_polya_length,
+        '-anchored' if args.exclude_internal_polya_matches else '',
+        args.minimum_differences
+    )
 )
 
 # Poly(A) tail reverse complement sub-directory
 polyt_build_dir = os.path.join(
     args.build_directory,
     'poly-t',
-    'minlength-%d' % args.min_polya_length,
-    'anchored' if args.exclude_internal_polya_matches else 'unanchored'
+    'minlength%d%s_mindiff-%d' % (
+        args.min_polya_length,
+        '-anchored' if args.exclude_internal_polya_matches else '',
+        args.minimum_differences
+    )
 )
 
 # Create a reversed version of the SL sequence
@@ -1698,12 +1773,12 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
            r'\2', r'\4')
 def find_rsl_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
-    rsl_filter = 'A' * args.min_rsl_length
+    rsl_filter = 'A' * args.min_sl_length
 
-    if args.exclude_internal_rsl_matches:
-        rsl_regex = 'A{%d,}$' % (args.min_rsl_length)
+    if args.exclude_internal_sl_matches:
+        rsl_regex = 'A{%d,}$' % (args.min_sl_length)
     else:
-        rsl_regex = 'A{%d,}' % (args.min_rsl_length)
+        rsl_regex = 'A{%d,}' % (args.min_sl_length)
 
     # input reads
     input_reads = os.path.join(
@@ -1711,11 +1786,12 @@ def find_rsl_reads(input_file, output_file, sample_id, read_num):
         "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
     find_sequence(input_reads, 'rsl', rsl_filter, rsl_regex,
-                  rsl_build_dir, sample_id, read_num, trim_direction='right')
+                  rsl_build_dir, sample_id, read_num, trim_direction='right',
+                  reverse=True)
     open(output_file, 'w').close()
 
 #
-# Poly(A) Step 2
+# RSL Step 2
 #
 @transform(find_rsl_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_rsl_reads'),
@@ -1727,7 +1803,7 @@ def map_rsl_reads(input_file, output_file, sample_id, read_num):
     open(output_file, 'w').close()
 
 #
-# Poly(A) Step 3
+# RSL Step 3
 #
 @transform(map_rsl_reads,
            regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_rsl_reads'),
@@ -1735,7 +1811,7 @@ def map_rsl_reads(input_file, output_file, sample_id, read_num):
            r'\2', r'\3')
 def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info(
-        "# Computing coordinates for mapped rsldenylation events [A]")
+        "# Computing coordinates for mapped reverse sl events [A]")
     compute_coordinates('rsl', rsl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 
