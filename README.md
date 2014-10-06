@@ -22,6 +22,10 @@ some of the design decisions, see my [research in progress presenation from
 - Genome sequence (fasta)
 - Genome annotation including CDS coordinates (gff)
 - Spliced leader sequence (for 5'UTR/SL analysis)
+- [Optional] Genome sequen for a second species that is not of interest but may
+    be used to filter out reads, e.g. in a mixed transcriptome study (fasta)
+- [Optional] A GFF containing addition ORFs outside of the primary genome
+    annotations to be included when assigning acceptor sites.
 
 ## Goals
 
@@ -51,8 +55,8 @@ Background
 
 ### Organization in the genome
 
-- Tryp. genomes contain tandem arrays of several hundred SL genes from which
-the SL is transcribed.
+- Trypanosome genomes contain tandem arrays of several hundred SL genes from
+    which the SL is transcribed.
 - "SL repeat" = SL RNA and a non-transcribed spacer.
 - The SL exon sequence is highly conserved, while the spacer regions are 
   highly variable and sometimes used to differentiate closely related tryp.

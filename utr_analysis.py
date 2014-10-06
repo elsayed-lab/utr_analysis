@@ -241,7 +241,7 @@ def sort_and_index(base_output, log_handle):
     log_handle.info("# Done sorting and indexing")
 
 def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
-               max_multihits=20, extra_args=""):
+               read_mismatches=2, max_multihits=20, extra_args=""):
     """
     Uses Tophat to map reads with the specified settings.
 
@@ -287,8 +287,8 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     # using a single-thread to be safe...
 
     # build command
-    cmd = "tophat --num-threads %d --max-multihits %d %s -o %s %s %s %s" % (
-           num_threads, max_multihits, extra_args,
+    cmd = "tophat --num-threads %d --max-multihits %d --read-mismatches %d %s -o %s %s %s %s" % (
+           num_threads, max_multihits, read_mismatches, extra_args,
            output_dir, genome_basename, r1, r2)
 
     # run tophat
@@ -344,7 +344,8 @@ def gzip_str(filepath, strbuffer):
     fp.write(strbuffer.read())
     fp.close()
 
-def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
+def filter_mapped_reads(r1, r2, genome, tophat_dir,
+                        output_fastq, log_handle, read_mismatches=2): 
     """
     Maps reads using tophat and discards any that align to the genome.
 
@@ -362,6 +363,8 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
         Filepath to save filtered FASTQ files to
     log_handle: logging.Handle
         Handler to use for logging.
+    read_mismatches: int
+        Number of mismatches to allow when scanning with Tophat.
     """
     # bam / fastq filepaths
     bam_input = os.path.join(tophat_dir, 'unmapped_sorted.bam')
@@ -371,7 +374,8 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle):
         # map reads to genome using tophat
         log_handle.info("# Mapping against %s" % os.path.basename(genome))
         ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
-                        extra_args='--no-mixed')
+                         read_mismatches=read_mismatches, 
+                         extra_args='--no-mixed')
 
         # number of reads before filtering
         num_reads_total = num_lines(r1) / 4
@@ -738,6 +742,10 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # matches are allowed
         feature_length = untrimmed_read.rlen - read.rlen
 
+        # Shorten if read was mapped near end of chromosome
+        feature_length = min(min(feature_length, read.pos),
+                            len(chr_sequences[chromosome]) - read.pos)
+
         # Acceptor site at right end of read
         if ((feature_name == 'polya') or (feature_name == 'rsl')):
             # 2014/10/04
@@ -763,10 +771,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         #
         if feature_name in ['sl', 'polyt']:
             # Grab region just before mapped read
-            genome_seq = str(
-                chr_sequences[chromosome][read.pos -
-                    feature_length:read.pos].seq
-            )
+            genome_seq = str(chr_sequences[chromosome][read.pos - feature_length:read.pos].seq)
 
             # get trimmed portion from left of read
             trimmed_portion = str(untrimmed_read.seq[:feature_length])
@@ -1668,8 +1673,11 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
         output_fastq_dir, "%s_genomic_reads_removed.fastq.gz" % (sample_id))
 
     # map reads and remove hits
+    # Initially we will keep all (unmapped) reads which differ from genome by
+    # at least one base. Later on we can be more restictive in our filtering
+    # to make sure we aren't getting spurious hits.
     filter_mapped_reads(r1, r2, args.target_genome, tophat_dir, output_fastq,
-                        logging)
+                        logging, read_mismatches=1)
     logging.info("# Finished removing genomic reads.")
 
     # Let ruffus know we are finished
