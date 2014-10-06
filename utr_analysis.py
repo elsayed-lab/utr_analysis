@@ -98,8 +98,10 @@ def parse_input():
     parser.add_argument('-f2', '--nontarget-genome', dest='nontarget_genome',
                         help=('Genome sequence FASTA filepath for species to '
                               'be filtered out prior to mapping. (optional)'))
-    parser.add_argument('-g', '--gff-annotation', dest='gff', required=True,
-                        help='Genome annotation GFF')
+    parser.add_argument('-g1', '--target-annotations', dest='target_gff',
+                        required=True, help='Genome annotation GFF')
+    parser.add_argument('-g2', '--nontarget-annotations', dest='nontarget_gff',
+                        required=True, help='Genome annotation GFF')
     parser.add_argument('-u', '--gff-uorf-annotations', dest='uorf_gff',
                         help=('GFF containing possible uORFs; generated during '
                               'final steps of processing and can be passed '
@@ -126,7 +128,7 @@ def parse_input():
                               ' sequence for a hit to be considered real. '
                               '(default=2)'))
     parser.add_argument('--num-threads', default=4, type=int,
-                        help='Number of threads to use.')
+                        help='Number of threads to use (default=4).')
 
     # Parse arguments
     args = parser.parse_args()
@@ -134,10 +136,12 @@ def parse_input():
     # Replace any environmental variables and return args
     args.target_genome = os.path.expandvars(args.target_genome)
     args.input_reads = os.path.expandvars(args.input_reads)
-    args.gff = os.path.expandvars(args.gff)
+    args.target_gff = os.path.expandvars(args.target_gff)
 
     if args.nontarget_genome:
         args.nontarget_genome = os.path.expandvars(args.nontarget_genome)
+    if args.nontarget_gff:
+        args.nontarget_gff = os.path.expandvars(args.nontarget_gff)
 
     # @TODO Validate input
     return args
@@ -240,8 +244,8 @@ def sort_and_index(base_output, log_handle):
     run_command(index_cmd, log_handle, wait=False)
     log_handle.info("# Done sorting and indexing")
 
-def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
-               read_mismatches=2, max_multihits=20, extra_args=""):
+def run_tophat(output_dir, genome, log_handle, r1, r2="", gff=None,
+               num_threads=1, read_mismatches=2, max_multihits=20, extra_args=""):
     """
     Uses Tophat to map reads with the specified settings.
 
@@ -254,6 +258,18 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     -N/--read-mismatches
         Final read alignments having more than these many mismatches are
         discarded. The default is 2.
+        
+    --no-novel-juncs
+        Only look for reads across junctions indicated in the supplied GFF or 
+        junctions file. (ignored without -G/-j)
+        
+    -G/--GTF <GTF/GFF3 file>	
+        Supply TopHat with a set of gene model annotations and/or known
+        transcripts, as a GTF 2.2 or GFF3 formatted file. If this option is
+        provided, TopHat will first extract the transcript sequences and use
+        Bowtie to align reads to this virtual transcriptome first. Only the
+        reads that do not fully map to the transcriptome will then be mapped on
+        the genome. 
 
     -x/--transcriptome-max-hits
         Maximum number of mappings allowed for a read, when aligned to the
@@ -287,7 +303,12 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", num_threads=1,
     # using a single-thread to be safe...
 
     # build command
-    cmd = "tophat --num-threads %d --max-multihits %d --read-mismatches %d %s -o %s %s %s %s" % (
+    if gff is not None:
+        cmd = 'tophat --no-novel-juncs -G %s ' % gff
+    else:
+        cmd = 'tophat '
+
+    cmd += "--num-threads %d --max-multihits %d --read-mismatches %d %s -o %s %s %s %s" % (
            num_threads, max_multihits, read_mismatches, extra_args,
            output_dir, genome_basename, r1, r2)
 
@@ -344,8 +365,8 @@ def gzip_str(filepath, strbuffer):
     fp.write(strbuffer.read())
     fp.close()
 
-def filter_mapped_reads(r1, r2, genome, tophat_dir,
-                        output_fastq, log_handle, read_mismatches=2): 
+def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
+                        gff=None, read_mismatches=2):
     """
     Maps reads using tophat and discards any that align to the genome.
 
@@ -363,6 +384,8 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir,
         Filepath to save filtered FASTQ files to
     log_handle: logging.Handle
         Handler to use for logging.
+    gff: string
+        Filepath to GFF to use during mapping (optional)
     read_mismatches: int
         Number of mismatches to allow when scanning with Tophat.
     """
@@ -374,7 +397,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir,
         # map reads to genome using tophat
         log_handle.info("# Mapping against %s" % os.path.basename(genome))
         ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
-                         read_mismatches=read_mismatches, 
+                         read_mismatches=read_mismatches, gff=gff,
                          extra_args='--no-mixed')
 
         # number of reads before filtering
@@ -463,6 +486,10 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     log = loggers[sample_id][feature_name][read_num]
     log.info("# Processing %s" % os.path.basename(input_file))
 
+    # determine whether regular expression in anchored
+    if (feature_regex.startswith("^") or feature_regex.endswith("$")):
+        internal = True
+
     # list to keep track of potential matches
     matches = []
 
@@ -480,7 +507,10 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     output_mated_reads = "%s_%s.fastq.gz" % (output_base[:-2], read_num_other)
 
     # compile regex
-    read_regex = re.compile(feature_regex)
+    if (trim_direction == 'right' and internal):
+        read_regex = re.compile(feature_regex[::-1])
+    else:
+        read_regex = re.compile(feature_regex)
 
     # total number of reads
     num_reads = num_lines(input_file) / 4
@@ -516,7 +546,18 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
             continue
 
         # check for match
-        match = re.search(read_regex, read[SEQUENCE_IDX])
+
+        # When looking for internal matches, there may be multiple hits. Choose
+        # the one that is closest to the edge of the read where the feature is
+        # expected to be found.
+        if (trim_direction == 'right' and internal):
+            match = re.search(read_regex, read[SEQUENCE_IDX][::-1])
+            match_start = len(read[SEQUENCE_IDX]) - match.end() 
+            match_end = len(read[SEQUENCE_IDX]) - match.start() 
+        else:
+            match = re.search(read_regex, read[SEQUENCE_IDX])
+            match_start = match.start()
+            match_end = match.end()
 
         # move on the next read if no match is found
         if match is None:
@@ -528,15 +569,15 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         # up to the end of the match
         if trim_direction == 'left':
             trimmed_read = [read[ID_IDX],
-                            read[SEQUENCE_IDX][match.end():],
+                            read[SEQUENCE_IDX][match_end:],
                             "+",
-                            read[QUALITY_IDX][match.end():]]
+                            read[QUALITY_IDX][match_end:]]
         else:
             # otherwise trim from the start of the match to the end of the read
             trimmed_read = [read[ID_IDX],
-                            read[SEQUENCE_IDX][:match.start()],
+                            read[SEQUENCE_IDX][:match_start],
                             "+",
-                            read[QUALITY_IDX][:match.start()]]
+                            read[QUALITY_IDX][:match_start]]
 
         # skip reads that are less than 36 bases after trimming
         if len(trimmed_read[SEQUENCE_IDX]) < 36:
@@ -636,8 +677,8 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
     #  --no-mixed ?
     ret = run_tophat(output_dir, args.target_genome,
                  loggers[sample_id][feature_name][read_num],
-                 r1_filepath, r2_filepath,
-                 extra_args='--mate-inner-dist 170 --transcriptome-max-hits 1')
+                 r1_filepath, r2_filepath, gff=args.target_gff,
+                 extra_args='--transcriptome-max-hits 1')
 
     loggers[sample_id][feature_name][read_num].info(
         "# Finished mapping hits to genome"
@@ -1101,7 +1142,7 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
     fp.write("#track name=%s color=%s\n" % (feature_name.upper(), track_color))
 
     # Copy chromosome entries from primary GFF
-    annotations_fp = open(args.gff)
+    annotations_fp = open(args.target_gff)
 
     for line in annotations_fp:
         if "\tchromosome\t" in line:
@@ -1154,7 +1195,7 @@ def output_unannotated_orfs(results, filepath):
     fp.write("#track name=unannotated_ORFs color='134,166,83'\n")
 
     # Copy chromosome entries from primary GFF
-    #annotations_fp = open(args.gff)
+    #annotations_fp = open(args.target_gff)
 
     #for line in annotations_fp:
     #    if "\tchromosome\t" in line:
@@ -1251,7 +1292,7 @@ def load_annotations():
     chromosomes = {}
 
     # Load existing gene annotations
-    annotations_fp = open(args.gff)
+    annotations_fp = open(args.target_gff)
 
     for entry in GFF.parse(annotations_fp):
         if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
@@ -1616,9 +1657,12 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
     output_fastq = os.path.join(
         fastq_dir, "%s_nontarget_reads_removed.fastq.gz" % (sample_id))
 
+    # check for gff
+    gff=args.nontarget_gff if args.nontarget_gff else None
+
     # map reads and remove hits
     filter_mapped_reads(r1, r2, args.nontarget_genome, tophat_dir,
-                        output_fastq, logging)
+                        output_fastq, logging, gff=gff)
     logging.info("# Finished removing nontarget reads.")
 
     # Let ruffus know we are finished
@@ -1677,7 +1721,7 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
     # at least one base. Later on we can be more restictive in our filtering
     # to make sure we aren't getting spurious hits.
     filter_mapped_reads(r1, r2, args.target_genome, tophat_dir, output_fastq,
-                        logging, read_mismatches=1)
+                        logging, read_mismatches=1, gff=args.target_gff)
     logging.info("# Finished removing genomic reads.")
 
     # Let ruffus know we are finished
