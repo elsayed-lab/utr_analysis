@@ -101,7 +101,7 @@ def parse_input():
     parser.add_argument('-g1', '--target-annotations', dest='target_gff',
                         required=True, help='Genome annotation GFF')
     parser.add_argument('-g2', '--nontarget-annotations', dest='nontarget_gff',
-                        required=True, help='Genome annotation GFF')
+                        help='Genome annotation GFF')
     parser.add_argument('-u', '--gff-uorf-annotations', dest='uorf_gff',
                         help=('GFF containing possible uORFs; generated during '
                               'final steps of processing and can be passed '
@@ -487,8 +487,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     log.info("# Processing %s" % os.path.basename(input_file))
 
     # determine whether regular expression in anchored
-    if (feature_regex.startswith("^") or feature_regex.endswith("$")):
-        internal = True
+    internal = (feature_regex.startswith("^") or feature_regex.endswith("$"))
 
     # list to keep track of potential matches
     matches = []
@@ -584,6 +583,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
             continue
 
         # take reverse complement if requested
+        # this will return the read back to the expected orientation (SL
+        # upstream/Poly(A) downstream)
         if reverse:
             trimmed_read[SEQUENCE_IDX] = str(
                 Seq.Seq(trimmed_read[SEQUENCE_IDX]).reverse_complement())
@@ -734,6 +735,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
                                 'strand', 'trimmed_start', 'trimmed_stop',
                                 'untrimmed_start', 'untrimmed_stop',
+                                'untrimmed_seq', 'trimmed_portion',
+                                'genome_seq',
                                 'acceptor_site'])
 
     # Load the untrimmed reads in order to to determine original read lengths
@@ -887,22 +890,21 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # (the putative SL or Poly(A) fragment) is different from what is at
         # the genome at the same location.
 
-        # 1) If trimmed portion is identical to what is in the genome,
-        # this is a false hit.
+        # 1) If trimmed portion is identical to what is in the genome, this is
+        #    a false hit.
         #
-        # Example: read with portion that is similar to SL sequence,
-        # but was unmapped initially because of errors downstream of
-        # SL sequence (e.g. four bases from SL at left of read, error
-        # downstream)
+        # Example: read with portion that is similar to SL sequence, but was
+        # unmapped initially because of errors downstream of SL sequence (e.g.
+        # four bases from SL at left of read, error downstream)
         if (feature_fragment == genome_seq) or (genome_seq == trimmed_portion):
             continue
 
-        # 2) If trimmed portion is very similar to genome, but very
-        #    different from the SL, it is also a false hit
-        # Example: Read which maps to a part of the genome with
-        # similarity to SL, but contains an error upstream of the SL
-        # sequence (e.g. four bases of SL in middle of read with error
-        # in region upstream preventing exact match to genome)
+        # 2) If trimmed portion is very similar to genome, but very different
+        #    from the SL, it is also a false hit Example: Read which maps to a
+        #    part of the genome with similarity to SL, but contains an error
+        #    upstream of the SL sequence (e.g. four bases of SL in middle of
+        #    read with error in region upstream preventing exact match to
+        #    genome)
         try:
             dist1 = distance.hamming(trimmed_portion, genome_seq)
             dist2 = distance.hamming(trimmed_portion, feature_fragment)
@@ -911,10 +913,28 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 continue
 
             # 3) Make sure there are at least x differences between the trimmed
-            # portion of the read and what is at the relevant locatio in the
-            # genome for the read to be considered real.
+            #    portion of the read and what is at the relevant location in
+            #    the genome for the read to be considered real.
             if (dist1 < args.minimum_differences):
                 continue
+
+            # 4) In order to ensure that garbage at the end of the read isn't
+            #    the only thing that is different between the trimmed portion
+            #    and the putative feature of interest, check to make sure at
+            #    least the minimum number of matching bases required are
+            #    different between the end of the trimmed portion of the read
+            #    and the corresponding genome location.
+            if feature_name in ['sl', 'rsl']:
+                if feature_name == 'sl':
+                    min_trimmed_exact = trimmed_portion[-args.min_sl_length:]
+                    min_genome_exact = genome_seq[-args.min_sl_length:]
+                elif feature_name == 'rsl':
+                    min_trimmed_exact = trimmed_portion[:args.min_sl_length]
+                    min_genome_exact = genome_seq[:args.min_sl_length]
+
+                if min_trimmed_exact == min_genome_exact:
+                    continue
+
         except:
             # occurs when sl is smaller than genome/trimed_portion
             # TESTING
@@ -955,6 +975,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             read.qname, gene['id'], chromosome, strand,
             read.pos, read.pos + read.rlen,
             untrimmed_read.pos, untrimmed_read.pos + untrimmed_read.rlen,
+            untrimmed_read.seq, trimmed_portion, genome_seq,
             acceptor_site
         ])
 
@@ -1837,6 +1858,8 @@ def find_rsl_reads(input_file, output_file, sample_id, read_num):
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
         "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
+    logging.info("# find_rsl_reads (%s %s)" % (sample_id, read_num))
+
     find_sequence(input_reads, 'rsl', rsl_filter, rsl_regex,
                   rsl_build_dir, sample_id, read_num, trim_direction='right',
                   reverse=True)
@@ -1893,6 +1916,8 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
         "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
 
+    logging.info("# find_polya_reads (%s %s)" % (sample_id, read_num))
+
     find_sequence(input_reads, 'polya', polya_filter, polya_regex,
                   polya_build_dir, sample_id, read_num, trim_direction='right')
     open(output_file, 'w').close()
@@ -1948,6 +1973,8 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
     input_reads = os.path.join(
         shared_build_dir, sample_id, 'fastq', 'genomic_reads_removed',
         "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
+
+    logging.info("# find_polyt_reads (%s %s)" % (sample_id, read_num))
 
     find_sequence(input_reads, 'polyt', polyt_filter, polyt_regex,
                   polyt_build_dir, sample_id, read_num, reverse=True)
