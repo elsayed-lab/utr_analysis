@@ -794,7 +794,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         if ((feature_name == 'polya') or (feature_name == 'rsl')):
             # 2014/10/04
             #acceptor_site = read.pos + read.rlen - 1
-            acceptor_site = read.pos + read.rlen + 1
+            #acceptor_site = read.pos + read.rlen + 1
+            acceptor_site = read.pos + read.rlen + 2
         else:
             # acceptor site at left end of read
             # 2014/10/04
@@ -856,6 +857,9 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             genome_seq = str(chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length].seq)
             # Get trimmed portion from right of untrimmed read
             trimmed_portion = str(untrimmed_read.seq[-feature_length:])
+
+            if gene['id'] == 'LmjF.01.0500':
+                import pdb; pdb.set_trace()
 
             # REVERSE SPLICED LEADER
             if feature_name == 'rsl':
@@ -1174,7 +1178,10 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
     writer = csv.writer(fp, delimiter='\t')
 
     # Determine GFF feature type to use
-    feature_type = 'trans_splice_site' if feature_name is 'sl' else 'polyA_site'
+    if feature_name in ['sl', 'rsl']: 
+        feature_type = 'trans_splice_site'
+    else:
+        feature_type = 'polyA_site'
 
     # write output to csv
     for chrnum in results:
