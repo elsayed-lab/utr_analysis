@@ -110,12 +110,16 @@ def parse_input():
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
                         required=True, help='Spliced leader DNA sequence',
                         default=None)
-    parser.add_argument('-es', '--exclude-internal-sl-matches',
+    parser.add_argument('--exclude-internal-sl-matches',
                         help=('Only allow matches with the SL at the upstream'
                               'end of a read.'), action='store_true')
-    parser.add_argument('-ep', '--exclude-internal-polya-matches',
+    parser.add_argument('--exclude-internal-polya-matches',
                         help=('Only allow matches with the Poly(A) tail at the'
                               'downstream end of a read.'), action='store_true')
+    parser.add_argument('--max-dist-from-edge',
+                        help=('For unanchored searches, what is the maximum '
+                        'distance from the edge of the read for a feature '
+                        'match to be considered.'), default=30)
     parser.add_argument('-m', '--min-sl-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-p', '--min-polya-length', default=10, type=int,
@@ -408,7 +412,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         os.remove(os.path.join(tophat_dir, "accepted_hits_sorted.bam"))
 
         log_handle.info(
-            "# Ignoring %d reads which mapped to specified genome (%d total)" %
+            "# Ignoring %d reads which mapped to specified genome (%d remaining)" %
             (num_reads_total - num_unmapped, num_unmapped)
         )
     else:
@@ -430,7 +434,7 @@ def get_next_file_name(base_name):
         return "%s.%d" % (base_name, next_file_num)
 
 def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
-                  build_dir, sample_id, read_num, trim_direction='left',
+                  build_dir, sample_id, read_num, trimmed_side='left',
                   reverse=False):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
@@ -459,7 +463,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         ID of the sample being scanned.
     read_num: str
         Which of the mated reads should be scanned. [R1|R2]
-    trim_direction: str
+    trimmed_side: str
         When trimming the matched sequence, also remove all bases in this
         direction of the match (default: left)
     reverse: bool
@@ -487,7 +491,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     log.info("# Processing %s" % os.path.basename(input_file))
 
     # determine whether regular expression in anchored
-    internal = (feature_regex.startswith("^") or feature_regex.endswith("$"))
+    anchored = (feature_regex.startswith("^") or feature_regex.endswith("$"))
 
     # list to keep track of potential matches
     matches = []
@@ -499,6 +503,13 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     output_untrimmed = "%s_%s_untrimmed.fastq.gz" % (output_base, feature_name)
     output_trimmed = "%s_%s_trimmed.fastq.gz" % (output_base, feature_name)
 
+    # Also keep track of match lengths which will be used for more rigorous
+    # filtering when comparing to the genome sequence near where the read is
+    # mapped.
+    match_lengths_dir = os.path.join(build_dir, sample_id, 'results')
+    output_lengths = "%s/match_lengths_%s.csv.gz" % (match_lengths_dir, read_num)
+    match_lengths_fp = gzip.open(output_lengths, 'wb')
+
     # mated reads
     read_num_other = "R1" if read_num == "R2" else "R2"
     input_file_mated = input_file.replace("." + read_num[-1],
@@ -506,10 +517,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     output_mated_reads = "%s_%s.fastq.gz" % (output_base[:-2], read_num_other)
 
     # compile regex
-    if (trim_direction == 'right' and internal):
-        read_regex = re.compile(feature_regex[::-1])
-    else:
-        read_regex = re.compile(feature_regex)
+    read_regex = re.compile(feature_regex)
 
     # total number of reads
     num_reads = num_lines(input_file) / 4
@@ -549,24 +557,31 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         # When looking for internal matches, there may be multiple hits. Choose
         # the one that is closest to the edge of the read where the feature is
         # expected to be found.
-        if (trim_direction == 'right' and internal):
-            match = re.search(read_regex, read[SEQUENCE_IDX][::-1])
-            match_start = len(read[SEQUENCE_IDX]) - match.end() 
-            match_end = len(read[SEQUENCE_IDX]) - match.start() 
-        else:
-            match = re.search(read_regex, read[SEQUENCE_IDX])
-            match_start = match.start()
-            match_end = match.end()
+        try:
+            # reverse sequence to search from right to left
+            # in case of the reverse SL, regex has already been inverted as
+            # well
+            if (trimmed_side == 'right' and (not anchored)):
+                match = re.search(read_regex, read[SEQUENCE_IDX][::-1])
+                match_start = len(read[SEQUENCE_IDX]) - match.end() 
+                match_end = len(read[SEQUENCE_IDX]) - match.start() 
+            else:
+                match = re.search(read_regex, read[SEQUENCE_IDX])
+                match_start = match.start()
+                match_end = match.end()
+        except:
+            import pdb; pdb.set_trace()
 
         # move on the next read if no match is found
         if match is None:
             continue
 
-        # otherwise add to output fastq
+        # match length
+        match_length = match.end() - match.start()
 
         # If feature is expected to be found at left of read, trim everything
         # up to the end of the match
-        if trim_direction == 'left':
+        if trimmed_side == 'left':
             trimmed_read = [read[ID_IDX],
                             read[SEQUENCE_IDX][match_end:],
                             "+",
@@ -582,13 +597,25 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         if len(trimmed_read[SEQUENCE_IDX]) < 36:
             continue
 
+        # length of portion trimmed off
+        trimmed_part_length = (len(read[SEQUENCE_IDX]) - 
+                               len(trimmed_read[SEQUENCE_IDX]))
+
+        # for internal matches, skip reads where match is not close enough to
+        # the edge of the read
+        if (trimmed_part_length - match_length) > args.max_dist_from_edge:
+            continue
+
+        # write length
+        match_lengths_fp.write(",".join([read[ID_IDX], str(match_length)]) + "\n")
+
         # take reverse complement if requested
         # this will return the read back to the expected orientation (SL
         # upstream/Poly(A) downstream)
-        if reverse:
-            trimmed_read[SEQUENCE_IDX] = str(
-                Seq.Seq(trimmed_read[SEQUENCE_IDX]).reverse_complement())
-            trimmed_read[QUALITY_IDX] = trimmed_read[QUALITY_IDX][::-1]
+        #if reverse:
+        #    trimmed_read[SEQUENCE_IDX] = str(
+        #        Seq.Seq(trimmed_read[SEQUENCE_IDX]).reverse_complement())
+        #    trimmed_read[QUALITY_IDX] = trimmed_read[QUALITY_IDX][::-1]
 
         # Otherwise add trimmed read to output
         reads_trimmed.write("\n".join(trimmed_read) + "\n")
@@ -633,6 +660,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     reads_trimmed.close()
     reads_untrimmed.close()
     mated_reads_buffer.close()
+    match_lengths_fp.close()
 
     log.info("# Finished processing %s" % os.path.basename(input_file))
 
@@ -690,6 +718,23 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     """
     Outputs coordinates and frequencies of putative UTR features to a GFF file.
 
+    Sequences manipulated below include:
+
+        untrimmed_seq       untrimmed read sequence
+        trimmed_seq         sequence of read after trimming
+        trimmed_part     sequence of the portion of the read trimmed off
+        trimmed_genome_seq  sequence at the genome location corresponding to
+                            trimmed portion of the read
+        matched_seq         sequence matched in previous step
+        matched_genome_seq  sequence at the genome location corresponding to
+                            the matched portion of the read
+
+    Note that, unless there is unanchored matching is used and the match is
+    internal (e.g. there is unrelated sequence upstream of the match), the
+    trimmed_part and matched_seq will be the same, otherwise the matched
+    sequences will be subsets of the trimmed ones.
+
+
     References
     ----------
     * http://www.cgat.org/~andreas/documentation/pysam/api.html#pysam.Samfile
@@ -724,7 +769,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     inside_cds = csv.writer(
         open('%s/inside_cds_%s.csv' % (output_dir, read_num), 'w')
     )
-    inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
+    inside_cds.writerow(['read_id', 'ch-romosome', 'strand', 'position'])
 
     # In addition to saving the coordinates as a GFF file, we will also write a
     # CSV file which contains entries for each read used. This can be useful
@@ -735,8 +780,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
                                 'strand', 'trimmed_start', 'trimmed_stop',
                                 'untrimmed_start', 'untrimmed_stop',
-                                'untrimmed_seq', 'trimmed_portion',
-                                'genome_seq',
+                                'untrimmed_seq', 'trimmed_part',
+                                'trimmed_genome_seq',
                                 'acceptor_site'])
 
     # Load the untrimmed reads in order to to determine original read lengths
@@ -760,6 +805,17 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     )
     sam = pysam.Samfile(input_bam, 'rb')
 
+    # open match lengths file
+    match_lengths_fp = gzip.open("%s/match_lengths_%s.csv.gz" % (
+        output_dir, read_num), 'rb')
+    match_reader = csv.reader(match_lengths_fp)
+
+    match_lengths = {}
+
+    for row in match_reader:
+        # drop the @ in front of HWI
+        match_lengths[row[0][1:]] = int(row[1])
+
     # Get coordinate and strand for each read in bam file
     for read in sam:
         # Get read where feature sequence was found
@@ -771,180 +827,187 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         chromosome = sam.getrname(read.tid)
         strand = "-" if read.is_reverse else "+"
 
-        # If feature was mapped on opposite strand, skip (will be explicitly
-        # detected in the complementary search
-        if ((feature_name == 'sl' and strand == '-') or
-            (feature_name == 'rsl' and strand == '+') or
-            (feature_name == 'polya' and strand == '-') or
-            (feature_name == 'polyt' and strand == '+')):
-            continue
-
         # Length of matched SL suffix or number of A's/T's
         untrimmed_read = untrimmed_reads[read.qname][read_num]
 
         # NOTE: this may be larger than the SL sequence length if unanchored
         # matches are allowed
-        feature_length = untrimmed_read.rlen - read.rlen
+        trimmed_part_length = untrimmed_read.rlen - read.rlen
 
-        # Shorten if read was mapped near end of chromosome
-        feature_length = min(min(feature_length, read.pos),
-                            len(chr_sequences[chromosome]) - read.pos)
+        # get match length (actual portion matched)
+        try:
+            match_length = match_lengths[read.qname]
+        except:
+            import pdb; pdb.set_trace()
 
-        # Acceptor site at right end of read
-        if ((feature_name == 'polya') or (feature_name == 'rsl')):
-            # 2014/10/04
-            #acceptor_site = read.pos + read.rlen - 1
-            #acceptor_site = read.pos + read.rlen + 1
-            acceptor_site = read.pos + read.rlen + 2
-        else:
-            # acceptor site at left end of read
-            # 2014/10/04
-            #acceptor_site = read.pos + 1
-            acceptor_site = read.pos
-
-        # Determine sequences of the trimmed portion of the read, the sequence
-        # for the region in the genome that was trimmed, and the relevant
-        # portion of SL/Poly(A) of same length and orientation as the putative
-        # feature
-
-        # QUESTION 2014/10/04
-        # Does SL match need to be extended to include part of genome in
-        # similar way to Poly(A)?
-
-        #
-        # Feature on left of read
-        #
+        # Side of original read trimmed
         if feature_name in ['sl', 'polyt']:
-            # Grab region just before mapped read
-            genome_seq = str(chr_sequences[chromosome][read.pos - feature_length:read.pos].seq)
-
-            # get trimmed portion from left of read
-            trimmed_portion = str(untrimmed_read.seq[:feature_length])
-
-            # SPLICED LEADER
-            if feature_name == 'sl':
-                feature_fragment = args.spliced_leader[-feature_length:]
-
-                # Shorten to size of feature if necessary
-                if len(trimmed_portion) > len(args.spliced_leader):
-                    genome_seq = genome_seq[-len(args.spliced_leader):]
-                    trimmed_portion = trimmed_portion[-len(args.spliced_leader):]
-
-            # POLY(T)
-            elif feature_name == 'polyt':
-                # grab region just before mapped read
-                feature_fragment = "T" * feature_length
-
-                # Extend detected read to include any T's present in the genome
-                # that were trimmed off
-                match = re.search('T*$', genome_seq)
-                overlap_length = match.end() - match.start()
-
-                if overlap_length > 0:
-                    # give back some T's and update the relevant sequences
-                    acceptor_site = acceptor_site - overlap_length
-                    feature_length = feature_length - overlap_length
-                    #genome_seq = (genome_seq[(2 * overlap_length):] + 
-                    #    "T" * overlap_length)
-                    genome_seq = genome_seq[:-overlap_length]
-                    trimmed_portion = trimmed_portion[:-overlap_length]
-                    feature_fragment = "T" * feature_length
-        #
-        # Feature on right of read
-        #
+            trimmed_side = 'left'
         elif feature_name in ['polya', 'rsl']:
+            trimmed_side = 'right'
+
+        # Actual strand of sequence
+        if feature_name in ['sl', 'polya']:
+            actual_strand = strand
+        elif feature_name in ['rsl', 'polyt']:
+            # For rsl/polyt, the actual strand is the opposite of where read
+            # was mapped
+            actual_strand = '+' if strand is '-' else '-' 
+
+        # Side of acceptor site after mapping
+        if strand == '+':
+            acceptor_site_side = trimmed_side
+        else:
+            acceptor_site_side = 'left' if trimmed_side == 'right' else 'right'
+
+        # Acceptor site position
+        if acceptor_site_side == 'left':
+            acceptor_site = read.pos
+        else:
+            acceptor_site = read.pos + read.rlen + 1
+
+        # Minimum length of feature
+        if feature_name in ['sl', 'rsl']:
+            min_feature_length = args.min_sl_length
+        else:
+            min_feature_length = args.min_polya_length
+
+        # If read is mapped too close to end of chromosome, skip it
+        # left end
+        if read.pos < (min_feature_length - 1):
+            continue
+        # right end
+        if ((read.pos + read.rlen) > (len(chromosomes[chromosome]) - 
+             min_feature_length)):
+            continue
+        
+        # Genome sequence just upstream of mapped location
+        if acceptor_site_side == 'left': 
+            # Shorten read if left end of read was mapped near end of
+            # chromosome
+            trimmed_part_length = min(min(trimmed_part_length, read.pos),
+                                      len(chr_sequences[chromosome]) - read.pos)
+
+            # Grab region just before mapped read
+            trimmed_genome_seq = chr_sequences[chromosome][read.pos -
+                trimmed_part_length:read.pos].seq
+
+            matched_genome_seq = trimmed_genome_seq[-match_length:]
+
+        # Genome sequence just downstream of mapped location
+        else:
+            # Shorten if right end of read was mapped near end of chromosome
+            trimmed_part_length = min(min(trimmed_part_length, read.pos),
+                                      len(chr_sequences[chromosome]) - 
+                                      (read.pos + read.rlen))
+
             # Grab region just after mapped untrimmed read
-            genome_seq = str(chr_sequences[chromosome][read.pos + read.rlen:read.pos + read.rlen + feature_length].seq)
-            # Get trimmed portion from right of untrimmed read
-            trimmed_portion = str(untrimmed_read.seq[-feature_length:])
+            trimmed_genome_seq = chr_sequences[chromosome][read.pos +
+                read.rlen:read.pos + read.rlen + trimmed_part_length].seq
+            matched_genome_seq = trimmed_genome_seq[:match_length]
 
-            if gene['id'] == 'LmjF.01.0500':
-                import pdb; pdb.set_trace()
+        # For reads mapped to negative strand, take complement
+        if strand == '+':
+            trimmed_genome_seq = str(trimmed_genome_seq)
+            matched_genome_seq = str(matched_genome_seq)
+        else:
+            trimmed_genome_seq = str(trimmed_genome_seq.complement())
+            matched_genome_seq = str(matched_genome_seq.complement())
 
-            # REVERSE SPLICED LEADER
-            if feature_name == 'rsl':
-                feature_fragment = reverse_sl[:feature_length]
+        # Get sequence of the trimmed portion of the read and the sequence that
+        # matched feature of interest
+        if trimmed_side == 'left':
+            # get trimmed portion from left of read
+            trimmed_part = str(untrimmed_read.seq[:trimmed_part_length])
+            matched_seq = trimmed_part[-match_length:]
+        else:
+            trimmed_part = str(untrimmed_read.seq[-trimmed_part_length:])
+            matched_seq = trimmed_part[:match_length]
 
-                # Shorten to size of feature if necessary
-                if len(trimmed_portion) > len(args.spliced_leader):
-                    genome_seq = genome_seq[:len(args.spliced_leader)]
-                    trimmed_portion = trimmed_portion[:len(args.spliced_leader)]
-
-            # POLY(A)
-            elif feature_name == 'polya':
-                feature_fragment = "A" * feature_length
-
-                # Extend detected read to include any A's present in the genome
-                # that were trimmed off
-                match = re.search('^A*', genome_seq)
+        # For Poly(A) tail, extend detected read to include any A's present in
+        # the genome that were trimmed off
+        if feature_name == 'polya':
+            # + strand
+            if strand == '+':
+                match = re.search('^A*', matched_genome_seq)
                 overlap_length = match.end() - match.start()
 
                 if overlap_length > 0:
+                    # TESTING
+                    import pdb; pdb.set_trace()
+
                     # give back some A's and update the relevant sequences
+                    matched_seq = matched_seq[overlap_length:]
+                    matched_genome_seq = matched_genome_seq + 
+                                         ("A" * overlap_length)
                     acceptor_site = acceptor_site + overlap_length
-                    feature_length = feature_length - overlap_length
-                    genome_seq = genome_seq[overlap_length:]
-                    trimmed_portion = trimmed_portion[overlap_length:]
-                    #genome_seq = ("A" * overlap_length +
-                    #    genome_seq[:(-overlap_length * 2)])
-                    feature_fragment = "A" * feature_length
+            # - strand
+            elif strand == '-':
+                match = re.search('T*$', matched_genome_seq)
+                overlap_length = match.end() - match.start()
 
+                if overlap_length > 0:
+                    # TESTING
+                    import pdb; pdb.set_trace()
+
+                    # give back some A's and update the relevant sequences
+                    matched_seq = matched_seq[:-overlap_length]
+                    matched_genome_seq = ("T" * overlap_length) +
+                                          matched_genome_seq
+                    acceptor_site = acceptor_site - overlap_length
+
+        # Poly(T)
+        elif feature_name == 'polyt':
+            # + strand (corresponds to gene on negative strand)
+            if strand == '+':
+                match = re.search('^T*', matched_genome_seq)
+                overlap_length = match.end() - match.start()
+
+                if overlap_length > 0:
+                    # TESTING
+                    import pdb; pdb.set_trace()
+
+                    # give back some A's and update the relevant sequences
+                    matched_seq = matched_seq[overlap_length:]
+                    matched_genome_seq = matched_genome_seq + 
+                                         ("T" * overlap_length)
+                    acceptor_site = acceptor_site - overlap_length
+            # - strand
+            elif strand == '-':
+                match = re.search('A*$', matched_genome_seq)
+                overlap_length = match.end() - match.start()
+
+                if overlap_length > 0:
+                    # TESTING
+                    import pdb; pdb.set_trace()
+
+                    # give back some A's and update the relevant sequences
+                    matched_seq = matched_seq[:-overlap_length]
+                    matched_genome_seq = matched_genome_seq + 
+                                         ("A" * overlap_length)
+                    acceptor_site = acceptor_site + overlap_length
+
+        # 
         # More filtering
-        # Here we will check to make sure that the trimmed portion of the read
-        # (the putative SL or Poly(A) fragment) is different from what is at
-        # the genome at the same location.
-
-        # 1) If trimmed portion is identical to what is in the genome, this is
-        #    a false hit.
         #
-        # Example: read with portion that is similar to SL sequence, but was
-        # unmapped initially because of errors downstream of SL sequence (e.g.
-        # four bases from SL at left of read, error downstream)
-        if (feature_fragment == genome_seq) or (genome_seq == trimmed_portion):
+
+        # Check to see that match differs from genome sequence (quick)
+        if (matched_seq == matched_genome_seq):
             continue
 
-        # 2) If trimmed portion is very similar to genome, but very different
-        #    from the SL, it is also a false hit Example: Read which maps to a
-        #    part of the genome with similarity to SL, but contains an error
-        #    upstream of the SL sequence (e.g. four bases of SL in middle of
-        #    read with error in region upstream preventing exact match to
-        #    genome)
         try:
-            dist1 = distance.hamming(trimmed_portion, genome_seq)
-            dist2 = distance.hamming(trimmed_portion, feature_fragment)
-
-            if (dist1 < dist2):
+            # Make sure that for the region matched, there are at least n
+            # differences between the match and the corresponding genomic
+            # sequence (slower)
+            match_dist = distance.hamming(matched_seq, matched_genome_seq)
+            if match_dist < args.minimum_differences:
                 continue
-
-            # 3) Make sure there are at least x differences between the trimmed
-            #    portion of the read and what is at the relevant location in
-            #    the genome for the read to be considered real.
-            if (dist1 < args.minimum_differences):
-                continue
-
-            # 4) In order to ensure that garbage at the end of the read isn't
-            #    the only thing that is different between the trimmed portion
-            #    and the putative feature of interest, check to make sure at
-            #    least the minimum number of matching bases required are
-            #    different between the end of the trimmed portion of the read
-            #    and the corresponding genome location.
-            if feature_name in ['sl', 'rsl']:
-                if feature_name == 'sl':
-                    min_trimmed_exact = trimmed_portion[-args.min_sl_length:]
-                    min_genome_exact = genome_seq[-args.min_sl_length:]
-                elif feature_name == 'rsl':
-                    min_trimmed_exact = trimmed_portion[:args.min_sl_length]
-                    min_genome_exact = genome_seq[:args.min_sl_length]
-
-                if min_trimmed_exact == min_genome_exact:
-                    continue
-
         except:
             # occurs when sl is smaller than genome/trimed_portion
-            # TESTING
-            print("Genome: " + genome_seq)
-            print("Trimmed: " + trimmed_portion)
-            print("Feature: " + feature_fragment)
+            print("Trimmed: " + trimmed_part)
+            print("Trimmed (genome): " + trimmed_genome_seq)
+            print("Matched: " + matched_seq)
+            print("Matched (genome): " + matched_genome_seq)
             import pdb; pdb.set_trace()
             continue
 
@@ -979,7 +1042,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             read.qname, gene['id'], chromosome, strand,
             read.pos, read.pos + read.rlen,
             untrimmed_read.pos, untrimmed_read.pos + untrimmed_read.rlen,
-            untrimmed_read.seq, trimmed_portion, genome_seq,
+            untrimmed_read.seq, trimmed_part, trimmed_genome_seq,
             acceptor_site
         ])
 
@@ -1086,13 +1149,13 @@ def find_closest_gene(chromosome, strand, feature_name, location):
     closest_dist = float('inf')
 
     for i, gene in enumerate(subseq.features):
-        # For SL, look at gene start locations and for Poly(A)/(T) look
+        # For SL/RSL, look at gene start locations and for Poly(A)/(T) look
         # at where each gene ends.
 
         # Gene on positive strand
         if gene.strand == 1:
             # SL acceptor site
-            if feature_name == 'sl':
+            if feature_name in ['sl', 'rsl']:
                 dist = gene.location.start - feature_location
             # Poly(A) acceptor site
             else:
@@ -1105,7 +1168,7 @@ def find_closest_gene(chromosome, strand, feature_name, location):
         # Gene on negative strand
         else:
             # SL acceptor site
-            if feature_name == 'sl':
+            if feature_name in ['sl', 'rsl']:
                 dist = feature_location - gene.location.end
             # Poly(A) acceptor site
             else:
@@ -1781,17 +1844,22 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
     # First-stage filter string
     sl_filter = args.spliced_leader[-args.min_sl_length:]
 
+    logging.info("# Finding SL reads")
+
     # Determine strings to match in reads
+    # Note that "|" separated regexes are greedily matched from left-to-right.
+    # In order to find the longest matching subsequence then we must order the
+    # regex so that the longest substring comes first.
     if args.exclude_internal_sl_matches:
-        sl_regex = '|'.join(
-            ["^" + args.spliced_leader[-x:] for x in
-             range(args.min_sl_length, len(args.spliced_leader) + 1)]
-        )
+        subseqs = ["^" + args.spliced_leader[-x:] for x in
+                  range(args.min_sl_length, len(args.spliced_leader) + 1)]
+        subseqs.reverse()
+        sl_regex = '|'.join(subseqs)
     else:
-        sl_regex = '|'.join(
-            [args.spliced_leader[-x:] for x in
-             range(args.min_sl_length, len(args.spliced_leader) + 1)]
-        )
+        subseqs = [args.spliced_leader[-x:] for x in
+                   range(args.min_sl_length, len(args.spliced_leader) + 1)]
+        subseqs.reverse()
+        sl_regex = '|'.join(subseqs)
 
     # input reads
     input_reads = os.path.join(
@@ -1853,12 +1921,23 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
            r'\2', r'\4')
 def find_rsl_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
-    rsl_filter = 'A' * args.min_sl_length
+    # First-stage filter string
+    rsl_filter = reverse_sl[:args.min_sl_length]
 
+    # Determine strings to match in reads
     if args.exclude_internal_sl_matches:
-        rsl_regex = 'A{%d,}$' % (args.min_sl_length)
+        subseqs = [reverse_sl[:x] + '$' for x in
+                  range(args.min_sl_length, len(args.spliced_leader) + 1)]
+        subseqs.reverse()
+        rsl_regex = '|'.join(subseqs)
     else:
-        rsl_regex = 'A{%d,}' % (args.min_sl_length)
+        # In order to simplify detection of the right-most features in cases
+        # where  multiple matches are present in read, we will reverse the 
+        # read and regex and search and then invert results
+        subseqs = [reverse_sl[:x][::-1] for x in
+                   range(args.min_sl_length, len(args.spliced_leader) + 1)]
+        subseqs.reverse()
+        rsl_regex = '|'.join(subseqs)
 
     # input reads
     input_reads = os.path.join(
@@ -1868,7 +1947,7 @@ def find_rsl_reads(input_file, output_file, sample_id, read_num):
     logging.info("# find_rsl_reads (%s %s)" % (sample_id, read_num))
 
     find_sequence(input_reads, 'rsl', rsl_filter, rsl_regex,
-                  rsl_build_dir, sample_id, read_num, trim_direction='right',
+                  rsl_build_dir, sample_id, read_num, trimmed_side='right',
                   reverse=True)
     open(output_file, 'w').close()
 
@@ -1926,7 +2005,7 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
     logging.info("# find_polya_reads (%s %s)" % (sample_id, read_num))
 
     find_sequence(input_reads, 'polya', polya_filter, polya_regex,
-                  polya_build_dir, sample_id, read_num, trim_direction='right')
+                  polya_build_dir, sample_id, read_num, trimmed_side='right')
     open(output_file, 'w').close()
 
 #
