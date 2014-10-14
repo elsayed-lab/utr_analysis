@@ -567,14 +567,15 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
                 match_end = len(read[SEQUENCE_IDX]) - match.start() 
             else:
                 match = re.search(read_regex, read[SEQUENCE_IDX])
+
+                # move on the next read if no match is found
+                if match is None:
+                    continue
+
                 match_start = match.start()
                 match_end = match.end()
         except:
             import pdb; pdb.set_trace()
-
-        # move on the next read if no match is found
-        if match is None:
-            continue
 
         # match length
         match_length = match.end() - match.start()
@@ -911,8 +912,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             trimmed_genome_seq = str(trimmed_genome_seq)
             matched_genome_seq = str(matched_genome_seq)
         else:
-            trimmed_genome_seq = str(trimmed_genome_seq.complement())
-            matched_genome_seq = str(matched_genome_seq.complement())
+            trimmed_genome_seq = str(trimmed_genome_seq.reverse_complement())
+            matched_genome_seq = str(matched_genome_seq.reverse_complement())
 
         # Get sequence of the trimmed portion of the read and the sequence that
         # matched feature of interest
@@ -933,13 +934,11 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 overlap_length = match.end() - match.start()
 
                 if overlap_length > 0:
-                    # TESTING
-                    import pdb; pdb.set_trace()
-
                     # give back some A's and update the relevant sequences
                     matched_seq = matched_seq[overlap_length:]
-                    matched_genome_seq = matched_genome_seq + 
-                                         ("A" * overlap_length)
+                    matched_genome_seq = matched_genome_seq[overlap_length:]
+                    #matched_genome_seq = (matched_genome_seq + 
+                    #                      ("A" * overlap_length))
                     acceptor_site = acceptor_site + overlap_length
             # - strand
             elif strand == '-':
@@ -948,43 +947,46 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
                 if overlap_length > 0:
                     # TESTING
-                    import pdb; pdb.set_trace()
+                    #import pdb; pdb.set_trace()
 
                     # give back some A's and update the relevant sequences
                     matched_seq = matched_seq[:-overlap_length]
-                    matched_genome_seq = ("T" * overlap_length) +
-                                          matched_genome_seq
+                    matched_genome_seq = matched_genome_seq[:-overlap_length]
+                    #matched_genome_seq = (("T" * overlap_length) +
+                    #                       matched_genome_seq)
                     acceptor_site = acceptor_site - overlap_length
 
         # Poly(T)
         elif feature_name == 'polyt':
             # + strand (corresponds to gene on negative strand)
             if strand == '+':
-                match = re.search('^T*', matched_genome_seq)
+                match = re.search('T*$', matched_genome_seq)
                 overlap_length = match.end() - match.start()
 
                 if overlap_length > 0:
                     # TESTING
-                    import pdb; pdb.set_trace()
-
-                    # give back some A's and update the relevant sequences
-                    matched_seq = matched_seq[overlap_length:]
-                    matched_genome_seq = matched_genome_seq + 
-                                         ("T" * overlap_length)
-                    acceptor_site = acceptor_site - overlap_length
-            # - strand
-            elif strand == '-':
-                match = re.search('A*$', matched_genome_seq)
-                overlap_length = match.end() - match.start()
-
-                if overlap_length > 0:
-                    # TESTING
-                    import pdb; pdb.set_trace()
+                    #import pdb; pdb.set_trace()
 
                     # give back some A's and update the relevant sequences
                     matched_seq = matched_seq[:-overlap_length]
-                    matched_genome_seq = matched_genome_seq + 
-                                         ("A" * overlap_length)
+                    matched_genome_seq = matched_genome_seq[:-overlap_length]
+                    #matched_genome_seq = (matched_genome_seq + 
+                    #                      ("T" * overlap_length))
+                    acceptor_site = acceptor_site - overlap_length
+            # - strand
+            elif strand == '-':
+                match = re.search('^A*', matched_genome_seq)
+                overlap_length = match.end() - match.start()
+
+                if overlap_length > 0:
+                    # TESTING
+                    #import pdb; pdb.set_trace()
+
+                    # give back some A's and update the relevant sequences
+                    matched_seq = matched_seq[overlap_length:]
+                    matched_genome_seq = matched_genome_seq[overlap_length:]
+                    #matched_genome_seq = (matched_genome_seq + 
+                    #                      ("A" * overlap_length))
                     acceptor_site = acceptor_site + overlap_length
 
         # 
@@ -1019,8 +1021,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             continue
 
         # Find nearest gene
-        gene = find_closest_gene(chromosomes[chromosome], strand, feature_name,
-                                 acceptor_site)
+        gene = find_closest_gene(chromosomes[chromosome], feature_name,
+                                 acceptor_site, acceptor_site_side)
 
         # If no nearby genes were found, stop here
         if gene is None:
@@ -1121,7 +1123,7 @@ def is_inside_cds(chromosome, location):
 
     return False
 
-def find_closest_gene(chromosome, strand, feature_name, location):
+def find_closest_gene(chromosome, feature_name, location, acceptor_site_side):
     """
     Finds the closest gene to a specified location that is in the expected
     orientation.
@@ -1131,8 +1133,14 @@ def find_closest_gene(chromosome, strand, feature_name, location):
     half_win = args.window_size / 2
 
     # Window boundaries
-    window_start = max(0, location - half_win)
-    window_end = min(ch_end, location + half_win)
+
+    # If acceptor site is on left of mapped read, look for genes to the right
+    if acceptor_site_side == 'left':
+        window_start = location
+        window_end = min(ch_end, location + half_win)
+    else:
+        window_start = max(0, location - half_win)
+        window_end = location
 
     subseq = chromosome[window_start:window_end]
 
@@ -1149,6 +1157,17 @@ def find_closest_gene(chromosome, strand, feature_name, location):
     closest_dist = float('inf')
 
     for i, gene in enumerate(subseq.features):
+        # Make sure strand of gene is appropriate for the feature and
+        # orientation
+        if acceptor_site_side == 'left':
+            if ((gene_strand == -1 and feature_name in ['sl', 'rsl']) or 
+                (gene_strand ==  1 and feature_name in ['polya', 'polyt'])):
+                continue
+        elif acceptor_site_side == 'right':
+            if ((gene_strand == -1 and feature_name in ['polya', 'polyt']) or 
+                (gene_strand ==  1 and feature_name in ['sl', 'rsl'])):
+                continue
+
         # For SL/RSL, look at gene start locations and for Poly(A)/(T) look
         # at where each gene ends.
 
