@@ -929,7 +929,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # the genome that were trimmed off
         if feature_name == 'polya':
             # + strand
-            if strand == '+':
+            if actual_strand == '+':
                 match = re.search('^A*', matched_genome_seq)
                 overlap_length = match.end() - match.start()
 
@@ -941,7 +941,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                     #                      ("A" * overlap_length))
                     acceptor_site = acceptor_site + overlap_length
             # - strand
-            elif strand == '-':
+            elif actual_strand == '-':
                 match = re.search('T*$', matched_genome_seq)
                 overlap_length = match.end() - match.start()
 
@@ -958,8 +958,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         # Poly(T)
         elif feature_name == 'polyt':
-            # + strand (corresponds to gene on negative strand)
-            if strand == '+':
+            # - strand
+            if actual_strand == '-':
                 match = re.search('T*$', matched_genome_seq)
                 overlap_length = match.end() - match.start()
 
@@ -973,8 +973,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                     #matched_genome_seq = (matched_genome_seq + 
                     #                      ("T" * overlap_length))
                     acceptor_site = acceptor_site - overlap_length
-            # - strand
-            elif strand == '-':
+            # + strand (corresponds to gene on negative strand)
+            elif actual_strand == '+':
                 match = re.search('^A*', matched_genome_seq)
                 overlap_length = match.end() - match.start()
 
@@ -1160,12 +1160,12 @@ def find_closest_gene(chromosome, feature_name, location, acceptor_site_side):
         # Make sure strand of gene is appropriate for the feature and
         # orientation
         if acceptor_site_side == 'left':
-            if ((gene_strand == -1 and feature_name in ['sl', 'rsl']) or 
-                (gene_strand ==  1 and feature_name in ['polya', 'polyt'])):
+            if ((gene.strand == -1 and feature_name in ['sl', 'rsl']) or 
+                (gene.strand ==  1 and feature_name in ['polya', 'polyt'])):
                 continue
         elif acceptor_site_side == 'right':
-            if ((gene_strand == -1 and feature_name in ['polya', 'polyt']) or 
-                (gene_strand ==  1 and feature_name in ['sl', 'rsl'])):
+            if ((gene.strand == -1 and feature_name in ['polya', 'polyt']) or 
+                (gene.strand ==  1 and feature_name in ['sl', 'rsl'])):
                 continue
 
         # For SL/RSL, look at gene start locations and for Poly(A)/(T) look

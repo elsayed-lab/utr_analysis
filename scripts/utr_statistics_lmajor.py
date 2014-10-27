@@ -23,14 +23,14 @@ def main():
 
     # Procyclic
     procyclic_dir = os.path.expandvars(
-        '$SCRATCH/utr_analysis/lmajor-procyclic/results/minlength-4/unanchored')
+        '$SCRATCH/utr_analysis/lmajor-procyclic/results/sl-min4_polya-min4-anchored_mindiff-2')
 
     sl_gff_proc = os.path.join(procyclic_dir, 'spliced_leader_sorted.gff')
     polya_gff_proc = os.path.join(procyclic_dir, 'polya_sorted.gff')
 
     # Metacyclic
     metacyclic_dir = os.path.expandvars(
-        '$SCRATCH/utr_analysis/lmajor-metacyclic/results/minlength-4/unanchored')
+        '$SCRATCH/utr_analysis/lmajor-metacyclic/results/sl-min4_polya-min4-anchored_mindiff-2')
 
     sl_gff_meta = os.path.join(metacyclic_dir, 'spliced_leader_sorted.gff')
     polya_gff_meta = os.path.join(metacyclic_dir, 'polya_sorted.gff')
@@ -44,6 +44,14 @@ def main():
     for ch in GFF.parse(open(gff)):
         for entry in ch.features:
             if entry.type == 'gene':
+                genes[entry.id] = entry
+
+    # Load ORFs detected via ribosome profiling
+    uorf_gff = "../lmajor_orfs_manual_2014-09-08_clean.gff"
+
+    for ch in GFF.parse(open(uorf_gff)):
+        for entry in ch.features:
+            if entry.type in ['gene', 'ORF']:
                 genes[entry.id] = entry
 
     # Load SL and Poly(A) sites
@@ -71,7 +79,7 @@ def main():
                                          'output/lmajor_5UTR_lengths_meta.txt')
     # Write combined 5'UTR lengths
     with open('output/lmajor_5UTR_lengths_all.txt', 'w') as fp:
-        fp.writelines(sorted(utr5_lengths_proc + utr5_lengths_meta))
+        fp.writelines(sorted(utr5_lengths_proc + utr5_lengths_meta, key=int))
 
     # 3'UTR lengths
     printb("Computing 3'UTR lengths...")
@@ -82,7 +90,7 @@ def main():
                                          'output/lmajor_3UTR_lengths_meta.txt')
     # Write combined 3'UTR lengths
     with open('output/lmajor_3UTR_lengths_all.txt', 'w') as fp:
-        fp.writelines(sorted(utr3_lengths_proc + utr3_lengths_meta))
+        fp.writelines(sorted(utr3_lengths_proc + utr3_lengths_meta, key=int))
 
     # Primary/minor SL acceptor site distances
     printb("Computing distances between primary and minor SL acceptor sites...")
@@ -92,7 +100,8 @@ def main():
     sl_site_distances_meta = compute_alt_acceptor_site_distances(
         sl_meta, genes, 'output/lmajor_dist_sl_sites_meta.txt')
     with open('output/lmajor_dist_sl_sites_all.txt', 'w') as fp:
-        fp.writelines(sorted(sl_site_distances_proc + sl_site_distances_meta))
+        fp.writelines(sorted(sl_site_distances_proc + sl_site_distances_meta,
+                             key=int))
 
     # Primary/minor Poly(A) acceptor site distances
     printb("Computing distances between primary and minor Poly(A) acceptor sites...")
@@ -103,7 +112,7 @@ def main():
         polya_meta, genes, 'output/lmajor_dist_polya_sites_meta.txt')
     with open('output/lmajor_dist_polya_sites_all.txt', 'w') as fp:
         fp.writelines(sorted(polya_site_distances_proc +
-                             polya_site_distances_meta))
+                             polya_site_distances_meta, key=int))
 
     # Primary/minor SL site usage stats in procyclic and metacyclic samples
     printb("Determining primary and minor trans-splicing site usage across conditions")
@@ -156,6 +165,7 @@ def compute_5utr_lengths(sl, genes, outfile):
 
             # for now, only consider UTRs of known genes
             if gene_id not in genes.keys():
+                print("%s not found!" % gene_id)
                 continue
             gene = genes[gene_id]
 
@@ -176,7 +186,7 @@ def compute_5utr_lengths(sl, genes, outfile):
 
     # save output
     with open(outfile, 'w') as fp:
-        fp.writelines(sorted(utr5_lengths))
+        fp.writelines(sorted(utr5_lengths, key=int))
 
     return utr5_lengths
 
@@ -196,6 +206,7 @@ def compute_3utr_lengths(polya, genes, outfile):
 
             # for now, only consider UTRs of known genes
             if gene_id not in genes.keys():
+                print("%s not found!" % gene_id)
                 continue
             gene = genes[gene_id]
 
@@ -213,7 +224,7 @@ def compute_3utr_lengths(polya, genes, outfile):
 
     # save output
     with open(outfile, 'w') as fp:
-        fp.writelines(sorted(utr3_lengths))
+        fp.writelines(sorted(utr3_lengths, key=int))
 
     return utr3_lengths
 
@@ -255,7 +266,7 @@ def compute_alt_acceptor_site_distances(acceptor_sites, genes, outfile):
                 distances.append("%s\n" % dist)
 
     with open(outfile, 'w') as fp:
-        fp.writelines(sorted(distances))
+        fp.writelines(sorted(distances, key=int))
 
     return distances
 
@@ -457,6 +468,7 @@ def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
 
             # for now, only consider UTRs of known genes
             if gene_id not in genes.keys():
+                print("%s not found!" % gene_id)
                 continue
             gene = genes[gene_id]
 
@@ -504,6 +516,7 @@ def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
 
             # for now, only consider UTRs of known genes
             if gene_id not in genes.keys():
+                print("%s not found!" % gene_id)
                 continue
             gene = genes[gene_id]
 
@@ -570,6 +583,7 @@ def write_3utr_matrix(polya_proc, polya_meta, genes, outfile):
 
             # for now, only consider UTRs of known genes
             if gene_id not in genes.keys():
+                print("%s not found!" % gene_id)
                 continue
             gene = genes[gene_id]
 
@@ -617,6 +631,7 @@ def write_3utr_matrix(polya_proc, polya_meta, genes, outfile):
 
             # for now, only consider UTRs of known genes
             if gene_id not in genes.keys():
+                print("%s not found!" % gene_id)
                 continue
             gene = genes[gene_id]
 
