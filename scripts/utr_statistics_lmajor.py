@@ -169,6 +169,14 @@ def compute_5utr_lengths(sl, genes, outfile):
                 continue
             gene = genes[gene_id]
 
+            # Example GFF entry & Biopython representation:
+            #
+            # LmjF.01 utr_analysis.py trans_splice_site       4950    4950    3       -       .       ID=LmjF.01.0010.sl.3;Name=LmjF.01.0010;description=hypothetical+protein,+unknown+functioFeatureLocation(ExactPosition(4949), ExactPosition(4950), strand=-1)
+            #
+            # SeqFeature(FeatureLocation(ExactPosition(4949),
+            # ExactPosition(4950), strand=-1), type='trans_splice_site',
+            # id='LmjF.01.0010.sl.3')
+            #
             # For information on biopython feature locations, see:
             # http://biopython.org/DIST/docs/api/Bio.SeqFeature.FeatureLocation-class.html
             acceptor_site_location = entry.location.end
@@ -177,7 +185,10 @@ def compute_5utr_lengths(sl, genes, outfile):
             if gene.strand == 1:
                 length = (gene.location.start + 1) - acceptor_site_location
             else:
-                length = acceptor_site_location - gene.location.end
+                length = acceptor_site_location - (gene.location.end + 1)
+
+            if gene.strand == 1:
+                import pdb; pdb.set_trace()
 
             if length < 1:
                 import pdb; pdb.set_trace()
@@ -355,7 +366,7 @@ def output_site_usage(genes, conda, conda_name, condb, condb_name,
         # chromosome number
         ch_num = ch_conda.id[-2:]
 
-        # genes for which acceptor sites have been observed (condaylic)
+        # genes for which acceptor sites have been observed (condition_a)
         gene_ids_conda = get_covered_geneids(ch_conda, genes)
 
         # genes for which acceptor sites have been observed (condition_b)
@@ -487,11 +498,11 @@ def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
 
             # otherwise get the UTR coordinates
             if gene.strand == 1:
-                start = str(acceptor_site_location)
+                start = str(acceptor_site_location + 1)
                 end = str(gene.location.start)
             else:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location)
+                end = str(acceptor_site_location - 1)
 
             # add to results
             if not start in results[gene_id]['sites']:
@@ -535,11 +546,11 @@ def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
 
             # otherwise get the UTR length
             if gene.strand == 1:
-                start = str(acceptor_site_location)
+                start = str(acceptor_site_location + 1)
                 end = str(gene.location.start)
             else:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location)
+                end = str(acceptor_site_location - 1)
 
             if not start in results[gene_id]['sites']:
                 results[gene_id]['sites'][start] = {}
@@ -603,9 +614,9 @@ def write_3utr_matrix(polya_proc, polya_meta, genes, outfile):
             # otherwise get the UTR coordinates
             if gene.strand == 1:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location)
+                end = str(acceptor_site_location - 1)
             else:
-                start = str(acceptor_site_location)
+                start = str(acceptor_site_location + 1)
                 end = str(gene.location.start)
 
             # add to results
@@ -651,9 +662,9 @@ def write_3utr_matrix(polya_proc, polya_meta, genes, outfile):
             # otherwise get the UTR coordinates
             if gene.strand == 1:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location)
+                end = str(acceptor_site_location - 1)
             else:
-                start = str(acceptor_site_location)
+                start = str(acceptor_site_location + 1)
                 end = str(gene.location.start)
 
             if not start in results[gene_id]['sites']:
