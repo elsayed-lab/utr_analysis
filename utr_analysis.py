@@ -1128,8 +1128,10 @@ def find_closest_gene(chromosome, feature_name, location, acceptor_site_side):
     Finds the closest gene to a specified location that is in the expected
     orientation.
     """
-    # 1. Get genes within +/- args.window_size/2 bases of location
+    # chromosome boundary
     ch_end =  int(chromosome.features[0].location.end)
+
+    # 1. Get genes within +/- args.window_size/2 bases of location
     half_win = args.window_size / 2
 
     # Window boundaries
@@ -1157,55 +1159,31 @@ def find_closest_gene(chromosome, feature_name, location, acceptor_site_side):
     closest_dist = float('inf')
 
     for i, gene in enumerate(subseq.features):
-        # Make sure strand of gene is appropriate for the feature and
-        # orientation
-        if acceptor_site_side == 'left':
-            if ((gene.strand == -1 and feature_name in ['sl', 'rsl']) or 
-                (gene.strand ==  1 and feature_name in ['polya', 'polyt'])):
-                continue
-        elif acceptor_site_side == 'right':
-            if ((gene.strand == -1 and feature_name in ['polya', 'polyt']) or 
-                (gene.strand ==  1 and feature_name in ['sl', 'rsl'])):
-                continue
 
         # For SL/RSL, look at gene start locations and for Poly(A)/(T) look
         # at where each gene ends.
-
-        # Gene on positive strand
-        if gene.strand == 1:
-            # SL acceptor site
-            if feature_name in ['sl', 'rsl']:
-                dist = gene.location.start - feature_location
-            # Poly(A) acceptor site
-            else:
-                dist = feature_location - gene.location.end
-
-            # make sure gene is downstream of SL / upstream of Poly(A)
-            if dist < 0:
-                continue
-
-        # Gene on negative strand
-        else:
-            # SL acceptor site
-            if feature_name in ['sl', 'rsl']:
-                dist = feature_location - gene.location.end
-            # Poly(A) acceptor site
-            else:
-                dist = gene.location.start - feature_location
-
-            # make sure gene is downstream of SL / upstream of Poly(A)
-            if dist < 0:
-                continue
+        dist = abs(gene.location.start - feature_location)
 
         # For Poly(A) look at gene endings
         if dist < closest_dist:
             closest_index = i
-            closest_gene = gene.id
+            closest_gene = gene
             closest_dist = dist
 
     # No genes found in correct orientation
     if closest_gene is None:
         return None
+
+    # Make sure strand of gene is appropriate for the feature and
+    # orientation
+    if acceptor_site_side == 'left':
+        if ((closest_gene.strand == -1 and feature_name in ['sl', 'rsl']) or 
+            (closest_gene.strand ==  1 and feature_name in ['polya', 'polyt'])):
+            return None
+    elif acceptor_site_side == 'right':
+        if ((closest_gene.strand == -1 and feature_name in ['polya', 'polyt']) or 
+            (closest_gene.strand ==  1 and feature_name in ['sl', 'rsl'])):
+            return None
 
     # Get description of closest matching gene
     try:
@@ -1221,7 +1199,7 @@ def find_closest_gene(chromosome, feature_name, location, acceptor_site_side):
 
     # Return details for matching gene
     return {
-        'id': closest_gene,
+        'id': closest_gene.id,
         'description': gene_description,
         'distance': closest_dist
     }

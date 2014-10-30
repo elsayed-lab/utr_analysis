@@ -116,13 +116,13 @@ def main():
 
     # Primary/minor SL site usage stats in procyclic and metacyclic samples
     printb("Determining primary and minor trans-splicing site usage across conditions")
-    output_site_usage(genes,
+    output_site_usage(genes, 'sl',
                       sl_proc, 'procyclic_num_reads',
                       sl_meta, 'metacyclic_num_reads',
                       'output/lmajor_primary_trans_splicing_site_proc.txt',
                       'output/lmajor_minor_trans_splicing_site_proc.txt')
 
-    output_site_usage(genes,
+    output_site_usage(genes, 'sl',
                       sl_meta, 'metacyclic_num_reads',
                       sl_proc, 'procyclic_num_reads',
                       'output/lmajor_primary_trans_splicing_site_meta.txt',
@@ -130,13 +130,13 @@ def main():
 
     # Primary/minor Poly(A) site usage stats in procyclic and metacyclic samples
     printb("Determining primary and minor poly-adenylation acceptor site usage across conditions")
-    output_site_usage(genes,
+    output_site_usage(genes, 'polya',
                       polya_proc, 'procyclic_num_reads',
                       polya_meta, 'metacyclic_num_reads',
                       'output/lmajor_primary_polya_site_proc.txt',
                       'output/lmajor_minor_polya_site_proc.txt')
 
-    output_site_usage(genes,
+    output_site_usage(genes, 'polya',
                       polya_meta, 'metacyclic_num_reads',
                       polya_proc, 'procyclic_num_reads',
                       'output/lmajor_primary_polya_site_meta.txt',
@@ -183,14 +183,11 @@ def compute_5utr_lengths(sl, genes, outfile):
 
             # otherwise get the UTR length
             if gene.strand == 1:
-                length = (gene.location.start + 1) - acceptor_site_location
+                length = gene.location.start - (acceptor_site_location + 1)
             else:
                 length = acceptor_site_location - (gene.location.end + 1)
 
-            if gene.strand == 1:
-                import pdb; pdb.set_trace()
-
-            if length < 1:
+            if length < 0:
                 import pdb; pdb.set_trace()
 
             utr5_lengths.append("%s\n" % length)
@@ -227,9 +224,12 @@ def compute_3utr_lengths(polya, genes, outfile):
 
             # otherwise get the UTR length
             if gene.strand == 1:
-                length = acceptor_site_location - gene.location.end
+                length = acceptor_site_location - (gene.location.end + 1)
             else:
-                length = (gene.location.start + 1) - acceptor_site_location
+                length = gene.location.start - (acceptor_site_location + 1)
+
+            if length < 0:
+                import pdb; pdb.set_trace()
 
             utr3_lengths.append("%s\n" % length)
 
@@ -270,9 +270,9 @@ def compute_alt_acceptor_site_distances(acceptor_sites, genes, outfile):
                 strand = genes[gene_id].strand
 
                 if strand == 1:
-                    dist = site.location.start - primary_site.location.start
+                    dist = site.location.end - primary_site.location.end
                 else:
-                    dist = primary_site.location.start - site.location.start
+                    dist = primary_site.location.end - site.location.end
 
                 distances.append("%s\n" % dist)
 
@@ -331,15 +331,14 @@ def get_site_by_location(sites, loc):
 #
 # Question 3: How does site usage differ between procyclic and metacyclic
 #
-    # lmajor_primary_trans_splicing_site_proc.v2.txt
-    #
-    # gene              strand   chr     cds.end   acceptor.site  # proc  # meta
-    # LmjF.01.0010       -       01       4703       5054       174       384
-    # LmjF.01.0020       -       01       7440       7631       71       108
-    # LmjF.01.0030       -       01       11068       11655       148       166
-
-def output_site_usage(genes, conda, conda_name, condb, condb_name,
-                      primary_outfile, minor_outfile):
+# gene    strand  chromosome      utr_start       utr_stop        metacyclic_num_reads    procyclic_num_reads
+# LmjF.01.0350    1       01      85073   85900   331     338
+# LmjF.01_67      1       01      243082  243193  2046    1773
+# LmjF.01.0270    -1      01      69907   70476   382     416
+# LmjF.01.0110    -1      01      29108   29374   741     600
+#
+def output_site_usage(genes, feature_type, conda, conda_name, condb,
+                      condb_name, primary_outfile, minor_outfile):
     """Computes acceptor site usage statistics for primary and minor sites
     under varying conditions"""
     # primary site CSV writer
@@ -412,12 +411,20 @@ def output_site_usage(genes, conda, conda_name, condb, condb_name,
                     primary_site_in_condb.qualifiers['score'][0])
 
             # determine UTR start and stop locations
-            if strand == 1:
-                start = primary_site.location.start
+            if ((feature_type == 'sl' and gene.strand == 1) or
+                (feature_type == 'polya' and gene.strand == -1)):
+                start = primary_site.location.end + 1
                 stop = gene.location.start
             else:
-                start = gene.location.end
+                start = gene.location.end + 1
                 stop = primary_site.location.start
+
+            #if strand == 1:
+            #    start = primary_site.location.end
+            #    stop = gene.location.end
+            #else:
+            #    start = gene.location.end
+            #    stop = primary_site.location.end
 
             # write row
             # LmjF.01.0010       -       01       4703       5054       174       384
@@ -445,11 +452,12 @@ def output_site_usage(genes, conda, conda_name, condb, condb_name,
                         minor_site_in_condb.qualifiers['score'][0])
 
                 # determine UTR start and stop locations
-                if strand == 1:
-                    start = minor_site.location.start
+                if ((feature_type == 'sl' and gene.strand == 1) or
+                    (feature_type == 'polya' and gene.strand == -1)):
+                    start = minor_site.location.end + 1
                     stop = gene.location.start
                 else:
-                    start = gene.location.end
+                    start = gene.location.end + 1
                     stop = minor_site.location.start
 
                 # write row
@@ -460,7 +468,14 @@ def output_site_usage(genes, conda, conda_name, condb, condb_name,
 
 #
 # Question 4: How many reads mapped to procyclic/metacyclic for each acceptor
-#             site?
+#             site? (includes minor sites as well as primary)
+#
+
+#
+# gene    strand  chr     start   stop    procyclic       metacyclic
+# LmjF.12.1130    +       12      573299  573387  0       1
+# LmjF.12.1130    +       12      573375  573387  5       0
+# LmjF.12.1130    +       12      573380  573387  22      31
 #
 def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
     """Generates a table with the coordinates and support for each SL acceptor
@@ -493,16 +508,20 @@ def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
             # Get score
             score = str(entry.qualifiers['score'][0])
 
-            # Get acceptor site location
-            acceptor_site_location = entry.location.end
-
-            # otherwise get the UTR coordinates
+            # UTR coordinates
             if gene.strand == 1:
-                start = str(acceptor_site_location + 1)
+                start = str(entry.location.end + 1)
                 end = str(gene.location.start)
             else:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location - 1)
+                end = str(entry.location.start)
+
+            #if gene.strand == 1:
+            #    start = str(acceptor_site_location + 1)
+            #    end = str(gene.location.start)
+            #else:
+            #    start = str(gene.location.end + 1)
+            #    end = str(acceptor_site_location - 1)
 
             # add to results
             if not start in results[gene_id]['sites']:
@@ -541,16 +560,13 @@ def write_5utr_matrix(sl_proc, sl_meta, genes, outfile):
             # Get score
             score = str(entry.qualifiers['score'][0])
 
-            # Get acceptor site location
-            acceptor_site_location = entry.location.end
-
-            # otherwise get the UTR length
+            # UTR coordinates
             if gene.strand == 1:
-                start = str(acceptor_site_location + 1)
+                start = str(entry.location.end + 1)
                 end = str(gene.location.start)
             else:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location - 1)
+                end = str(entry.location.start)
 
             if not start in results[gene_id]['sites']:
                 results[gene_id]['sites'][start] = {}
@@ -608,15 +624,12 @@ def write_3utr_matrix(polya_proc, polya_meta, genes, outfile):
             # Get score
             score = str(entry.qualifiers['score'][0])
 
-            # Get acceptor site location
-            acceptor_site_location = entry.location.end
-
-            # otherwise get the UTR coordinates
+            # UTR coordinates
             if gene.strand == 1:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location - 1)
+                end = str(entry.location.start)
             else:
-                start = str(acceptor_site_location + 1)
+                start = str(entry.location.end + 1)
                 end = str(gene.location.start)
 
             # add to results
@@ -656,15 +669,12 @@ def write_3utr_matrix(polya_proc, polya_meta, genes, outfile):
             # Get score
             score = str(entry.qualifiers['score'][0])
 
-            # Get acceptor site location
-            acceptor_site_location = entry.location.end
-
-            # otherwise get the UTR coordinates
+            # UTR coordinates
             if gene.strand == 1:
                 start = str(gene.location.end + 1)
-                end = str(acceptor_site_location - 1)
+                end = str(entry.location.start)
             else:
-                start = str(acceptor_site_location + 1)
+                start = str(entry.location.end + 1)
                 end = str(gene.location.start)
 
             if not start in results[gene_id]['sites']:
