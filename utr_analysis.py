@@ -946,9 +946,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
                 overlap_length = match.end() - match.start()
 
                 if overlap_length > 0:
-                    # TESTING
-                    #import pdb; pdb.set_trace()
-
                     # give back some A's and update the relevant sequences
                     matched_seq = matched_seq[:-overlap_length]
                     matched_genome_seq = matched_genome_seq[:-overlap_length]
@@ -958,35 +955,22 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         # Poly(T)
         elif feature_name == 'polyt':
+            match = re.search('T*$', matched_genome_seq)
+            overlap_length = match.end() - match.start()
+
             # - strand
             if actual_strand == '-':
-                match = re.search('T*$', matched_genome_seq)
-                overlap_length = match.end() - match.start()
-
                 if overlap_length > 0:
-                    # TESTING
-                    #import pdb; pdb.set_trace()
-
                     # give back some A's and update the relevant sequences
                     matched_seq = matched_seq[:-overlap_length]
                     matched_genome_seq = matched_genome_seq[:-overlap_length]
-                    #matched_genome_seq = (matched_genome_seq + 
-                    #                      ("T" * overlap_length))
                     acceptor_site = acceptor_site - overlap_length
             # + strand (corresponds to gene on negative strand)
             elif actual_strand == '+':
-                match = re.search('^A*', matched_genome_seq)
-                overlap_length = match.end() - match.start()
-
                 if overlap_length > 0:
-                    # TESTING
-                    #import pdb; pdb.set_trace()
-
                     # give back some A's and update the relevant sequences
                     matched_seq = matched_seq[overlap_length:]
                     matched_genome_seq = matched_genome_seq[overlap_length:]
-                    #matched_genome_seq = (matched_genome_seq + 
-                    #                      ("A" * overlap_length))
                     acceptor_site = acceptor_site + overlap_length
 
         # 
@@ -1023,6 +1007,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # Find nearest gene
         gene = find_closest_gene(chromosomes[chromosome], feature_name,
                                  acceptor_site, acceptor_site_side)
+
 
         # If no nearby genes were found, stop here
         if gene is None:
