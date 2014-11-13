@@ -922,6 +922,10 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             trimmed_part = str(untrimmed_read.seq[-trimmed_part_length:])
             matched_seq = trimmed_part[:match_length]
 
+        # Check to see that match differs from genome sequence (quick)
+        if (matched_seq == matched_genome_seq):
+            continue
+
         # Note: for real acceptor sites, actual_strand = gene_strand
 
         # For Poly(A) tail, extend detected read to include any A's present in
@@ -931,10 +935,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             overlap_length = match.end() - match.start()
 
             if overlap_length > 0:
-                # TESTING
-                if strand == '+':
-                    import pdb; pdb.set_trace();
-
                 matched_seq = matched_seq[overlap_length:]
                 matched_genome_seq = matched_genome_seq[overlap_length:]
 
@@ -952,24 +952,19 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             match = re.search('T*$', matched_genome_seq)
             overlap_length = match.end() - match.start()
 
-            # TESTING
-            if ((chromosome == 'LmjF.14') and (acceptor_site > 169900) and
-                (acceptor_site < 170000)):
-                    import pdb; pdb.set_trace();
+            if overlap_length > 0:
+                matched_seq = matched_seq[overlap_length:]
 
-            # - strand
-            if actual_strand == '-':
-                if overlap_length > 0:
+                # - strand
+                if actual_strand == '-':
                     # give back some A's and update the relevant sequences
-                    matched_seq = matched_seq[:-overlap_length]
                     matched_genome_seq = matched_genome_seq[:-overlap_length]
                     acceptor_site = acceptor_site - overlap_length
-            # + strand (corresponds to gene on negative strand)
-            elif actual_strand == '+':
-                if overlap_length > 0:
+                # + strand (for poly(t) reads this corresponds to gene on
+                # negative strand)
+                elif actual_strand == '+':
                     # give back some A's and update the relevant sequences
-                    matched_seq = matched_seq[overlap_length:]
-                    matched_genome_seq = matched_genome_seq[overlap_length:]
+                    matched_genome_seq = matched_genome_seq[:-overlap_length]
                     acceptor_site = acceptor_site + overlap_length
 
         # 
