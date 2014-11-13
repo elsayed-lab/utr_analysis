@@ -723,18 +723,17 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         untrimmed_seq       untrimmed read sequence
         trimmed_seq         sequence of read after trimming
-        trimmed_part     sequence of the portion of the read trimmed off
+        trimmed_part        sequence of the portion of the read trimmed off
         trimmed_genome_seq  sequence at the genome location corresponding to
                             trimmed portion of the read
         matched_seq         sequence matched in previous step
         matched_genome_seq  sequence at the genome location corresponding to
                             the matched portion of the read
 
-    Note that, unless there is unanchored matching is used and the match is
+    Note that, unless unanchored matching is used and the match is
     internal (e.g. there is unrelated sequence upstream of the match), the
     trimmed_part and matched_seq will be the same, otherwise the matched
     sequences will be subsets of the trimmed ones.
-
 
     References
     ----------
@@ -779,11 +778,9 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         open('%s/matched_reads_%s.csv' % (output_dir, read_num), 'w')
     )
     sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
-                                'strand', 'trimmed_start', 'trimmed_stop',
-                                'untrimmed_start', 'untrimmed_stop',
-                                'untrimmed_seq', 'trimmed_part',
-                                'trimmed_genome_seq',
-                                'acceptor_site'])
+        'gene_strand', 'read_strand', 'trimmed_start', 'trimmed_stop',
+        'untrimmed_seq', 'trimmed_part', 'trimmed_genome_seq', 'matched_seq',
+        'matched_genome_seq', 'acceptor_site'])
 
     # Load the untrimmed reads in order to to determine original read lengths
     input_bam_untrimmed = '%s/%s/tophat/mapped_to_target_untrimmed/unmapped_sorted.bam' % (
@@ -925,38 +922,40 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             trimmed_part = str(untrimmed_read.seq[-trimmed_part_length:])
             matched_seq = trimmed_part[:match_length]
 
+        # Note: for real acceptor sites, actual_strand = gene_strand
+
         # For Poly(A) tail, extend detected read to include any A's present in
         # the genome that were trimmed off
         if feature_name == 'polya':
-            # + strand
-            if actual_strand == '+':
-                match = re.search('^A*', matched_genome_seq)
-                overlap_length = match.end() - match.start()
+            match = re.search('^A*', matched_genome_seq)
+            overlap_length = match.end() - match.start()
 
-                if overlap_length > 0:
+            if overlap_length > 0:
+                # TESTING
+                if strand == '+':
+                    import pdb; pdb.set_trace();
+
+                matched_seq = matched_seq[overlap_length:]
+                matched_genome_seq = matched_genome_seq[overlap_length:]
+
+                if actual_strand == '+':
                     # give back some A's and update the relevant sequences
-                    matched_seq = matched_seq[overlap_length:]
-                    matched_genome_seq = matched_genome_seq[overlap_length:]
-                    #matched_genome_seq = (matched_genome_seq + 
-                    #                      ("A" * overlap_length))
+                    #matched_genome_seq = matched_genome_seq[overlap_length:]
                     acceptor_site = acceptor_site + overlap_length
-            # - strand
-            elif actual_strand == '-':
-                match = re.search('T*$', matched_genome_seq)
-                overlap_length = match.end() - match.start()
-
-                if overlap_length > 0:
+                elif actual_strand == '-':
                     # give back some A's and update the relevant sequences
-                    matched_seq = matched_seq[:-overlap_length]
-                    matched_genome_seq = matched_genome_seq[:-overlap_length]
-                    #matched_genome_seq = (("T" * overlap_length) +
-                    #                       matched_genome_seq)
+                    #matched_genome_seq = matched_genome_seq[-overlap_length:]
                     acceptor_site = acceptor_site - overlap_length
 
         # Poly(T)
         elif feature_name == 'polyt':
             match = re.search('T*$', matched_genome_seq)
             overlap_length = match.end() - match.start()
+
+            # TESTING
+            if ((chromosome == 'LmjF.14') and (acceptor_site > 169900) and
+                (acceptor_site < 170000)):
+                    import pdb; pdb.set_trace();
 
             # - strand
             if actual_strand == '-':
@@ -976,6 +975,10 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # 
         # More filtering
         #
+        # Check to see if feature is still sufficiently long;
+        # Disabling requirement for now. (2014/11/10)
+        #if len(matched_seq) < min_feature_length:
+        #    continue
 
         # Check to see that match differs from genome sequence (quick)
         if (matched_seq == matched_genome_seq):
@@ -1008,7 +1011,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         gene = find_closest_gene(chromosomes[chromosome], feature_name,
                                  acceptor_site, acceptor_site_side)
 
-
         # If no nearby genes were found, stop here
         if gene is None:
             no_nearby_genes.writerow(
@@ -1026,11 +1028,9 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
 
         # Add entry to sample output csv
         sample_csv_writer.writerow([
-            read.qname, gene['id'], chromosome, strand,
-            read.pos, read.pos + read.rlen,
-            untrimmed_read.pos, untrimmed_read.pos + untrimmed_read.rlen,
-            untrimmed_read.seq, trimmed_part, trimmed_genome_seq,
-            acceptor_site
+            read.qname, gene['id'], chromosome, actual_strand, strand,
+            read.pos, read.pos + read.rlen, untrimmed_read.seq, trimmed_part,
+            trimmed_genome_seq, matched_seq, matched_genome_seq, acceptor_site
         ])
 
         # Increment site count and save distance from gene
@@ -1096,9 +1096,11 @@ def is_inside_cds(chromosome, location):
         # at left-end, relative site is the actual one
         relative_location = location
     else:
-        # otherwise, window will be centered around the acceptor site, possibly
-        # clipped at the right-end
-        relative_location = len(nearby) / 2
+        # otherwise, window will be centered around the acceptor site, or, if
+        # near the right-end of the chromosome, the acceptor site will fall
+        # at the half-window mark
+        #relative_location = len(nearby) / 2
+        relative_location = half_window
 
     # scan all genes near putative feature
     for feature in nearby.features:
@@ -2087,9 +2089,7 @@ def combine_results(input_files, output_file):
     regex = '.*/(HPGL[0-9]+)_(R[1-2]).*'
 
     # Combine spliced leader output
-    logging.info("# Combining spliced leader coordinate output and filtering "
-                 "out sites with low support")
-
+    logging.info("# Combining spliced leader coordinates output")
     sl_gffs = []
     for infile in input_files:
         (sample_id, read_num) = re.match(regex, infile).groups()
@@ -2107,8 +2107,7 @@ def combine_results(input_files, output_file):
     sl_combined = combine_gff_results(sl_gffs)
 
     # Combine Poly(A) output
-    logging.info("# Combining Poly(A) coordinate output and filtering "
-                 "out sites with low support")
+    logging.info("# Combining Poly(A) coordinates output")
 
     polya_gffs = []
     for infile in input_files:
@@ -2135,6 +2134,8 @@ def combine_results(input_files, output_file):
 # Run pipeline
 #-----------------------------------------------------------------------------
 if __name__ == "__main__":
+    #pipeline_run([map_polya_reads], forcedtorun_tasks=[combine_results],
+    #             touch_files_only=True,
     pipeline_run([combine_results], forcedtorun_tasks=[combine_results],
                  logger=logging.getLogger(''), multiprocess=args.num_threads)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
