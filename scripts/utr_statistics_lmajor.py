@@ -25,15 +25,15 @@ def main():
     procyclic_dir = os.path.expandvars(
         '$SCRATCH/utr_analysis/lmajor-procyclic/results/sl-min4_polya-min4_mindiff-2')
 
-    sl_gff_proc = os.path.join(procyclic_dir, 'spliced_leader_sorted_no_ncrnas.gff')
-    polya_gff_proc = os.path.join(procyclic_dir, 'polya_sorted_no_ncrnas.gff')
+    sl_gff_proc = os.path.join(procyclic_dir, 'spliced_leader_no_ncrnas_sorted.gff')
+    polya_gff_proc = os.path.join(procyclic_dir, 'polya_no_ncrnas_sorted.gff')
 
     # Metacyclic
     metacyclic_dir = os.path.expandvars(
         '$SCRATCH/utr_analysis/lmajor-metacyclic/results/sl-min4_polya-min4_mindiff-2')
 
-    sl_gff_meta = os.path.join(metacyclic_dir, 'spliced_leader_sorted_no_ncrnas.gff')
-    polya_gff_meta = os.path.join(metacyclic_dir, 'polya_sorted_no_ncrnas.gff')
+    sl_gff_meta = os.path.join(metacyclic_dir, 'spliced_leader_no_ncrnas_sorted.gff')
+    polya_gff_meta = os.path.join(metacyclic_dir, 'polya_no_ncrnas_sorted.gff')
 
     # Load gene annotations
     printb("Loading Genome annotations...")

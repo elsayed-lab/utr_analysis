@@ -575,7 +575,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
                 match_start = match.start()
                 match_end = match.end()
         except:
-            import pdb; pdb.set_trace()
+            import pdb; pdb.set_trace();
 
         # match length
         match_length = match.end() - match.start()
@@ -1881,7 +1881,8 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
            r'\1/\2_\3.compute_sl_coordinates',
            r'\2', r'\3')
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info("# Computing coordinates for mapped trans-splicing events")
+    logging.info("# Computing coordinates for mapped trans-splicing events "
+                 "(%s)" % sample_id)
     compute_coordinates('sl', sl_build_dir, sample_id, read_num)
     open(output_file, 'w').close()
 

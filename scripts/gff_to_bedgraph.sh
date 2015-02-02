@@ -14,6 +14,12 @@
 sorted_gff=${1/.*}_sorted.gff
 outfile=${1/.*}_sorted.bedgraph
 
+# remove ncRNAs in L. major
+#noncrnas=${1/.*}_no_ncrnas.gff
+#sorted_gff=${1/.*}_no_ncrnas_sorted.gff
+#grep -v "LmjF\.[0-9]*\.5\?[a-zA-Z][\.]*" ${1} > $noncrnas
+#igvtools sort $noncrnas $sorted_gff
+
 # let's first sort and index the GFF files for comparison
 igvtools sort ${1} $sorted_gff
 igvtools index $sorted_gff
