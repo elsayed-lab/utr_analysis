@@ -66,75 +66,75 @@ Usage
 
 ### Overview
 
->usage: utr_analysis.py [-h] -i INPUT_READS -d BUILD_DIRECTORY -f1
->                       TARGET_GENOME [-f2 NONTARGET_GENOME] -g1 TARGET_GFF
->                       [-g2 NONTARGET_GFF] [-u UORF_GFF] -s SPLICED_LEADER
->                       [--exclude-internal-sl-matches]
->                       [--exclude-internal-polya-matches]
->                       [--max-dist-from-edge MAX_DIST_FROM_EDGE]
->                       [-m MIN_SL_LENGTH] [-p MIN_POLYA_LENGTH]
->                       [-w WINDOW_SIZE] [-x MINIMUM_DIFFERENCES]
->                       [--num-threads NUM_THREADS]
->
->Spliced Leader and poly-adenylation site analysis
->
->optional arguments:
->  -h, --help            show this help message and exit
->  -i INPUT_READS, --input-reads INPUT_READS
->                        RNA-Seq FASTQ or gzipped FASTQ glob string ora txt
->                        file containing filepaths to the samplesto be used
->  -d BUILD_DIRECTORY, --build-directory BUILD_DIRECTORY
->                        Directory to save output to
->  -f1 TARGET_GENOME, --target-genome TARGET_GENOME
->                        Genome sequence FASTA filepath for target species
->  -f2 NONTARGET_GENOME, --nontarget-genome NONTARGET_GENOME
->                        Genome sequence FASTA filepath for species to be
->                        filtered out prior to mapping. (optional)
->  -g1 TARGET_GFF, --target-annotations TARGET_GFF
->                        Genome annotation GFF
->  -g2 NONTARGET_GFF, --nontarget-annotations NONTARGET_GFF
->                        Genome annotation GFF
->  -u UORF_GFF, --gff-uorf-annotations UORF_GFF
->                        GFF containing possible uORFs; generated during final
->                        steps of processing and can be passed back in to re-
->                        perform analyses treating these locations as putative
->                        ORFs.
->  -s SPLICED_LEADER, --sl-sequence SPLICED_LEADER
->                        Spliced leader DNA sequence
->  --exclude-internal-sl-matches
->                        Only allow matches with the SL at the upstreamend of a
->                        read.
->  --exclude-internal-polya-matches
->                        Only allow matches with the Poly(A) tail at
->                        thedownstream end of a read.
->  --max-dist-from-edge MAX_DIST_FROM_EDGE
->                        For unanchored searches, what is the maximum distance
->                        from the edge of the read for a feature match to be
->                        considered.
->  -m MIN_SL_LENGTH, --min-sl-length MIN_SL_LENGTH
->                        Minimum length of SL match (default=10)
->  -p MIN_POLYA_LENGTH, --min-polya-length MIN_POLYA_LENGTH
->                        Minimum length of Poly-A match (default=10)
->  -w WINDOW_SIZE, --window-size WINDOW_SIZE
->                        Number of bases up or downstream of feature toscan for
->                        related genes (default=15000)
->  -x MINIMUM_DIFFERENCES, --minimum-differences MINIMUM_DIFFERENCES
->                        Minimum number of differences from genomic sequence
->                        for a hit to be considered real. (default=2)
->  --num-threads NUM_THREADS
->                        Number of threads to use (default=4).
+    usage: utr_analysis.py [-h] -i INPUT_READS -d BUILD_DIRECTORY -f1
+                           TARGET_GENOME [-f2 NONTARGET_GENOME] -g1 TARGET_GFF
+                           [-g2 NONTARGET_GFF] [-u UORF_GFF] -s SPLICED_LEADER
+                           [--exclude-internal-sl-matches]
+                           [--exclude-internal-polya-matches]
+                           [--max-dist-from-edge MAX_DIST_FROM_EDGE]
+                           [-m MIN_SL_LENGTH] [-p MIN_POLYA_LENGTH]
+                           [-w WINDOW_SIZE] [-x MINIMUM_DIFFERENCES]
+                           [--num-threads NUM_THREADS]
+    
+    Spliced Leader and poly-adenylation site analysis
+    
+    optional arguments:
+      -h, --help            show this help message and exit
+      -i INPUT_READS, --input-reads INPUT_READS
+    >                        RNA-Seq FASTQ or gzipped FASTQ glob string ora txt
+    >                        file containing filepaths to the samplesto be used
+    >  -d BUILD_DIRECTORY, --build-directory BUILD_DIRECTORY
+    >                        Directory to save output to
+    >  -f1 TARGET_GENOME, --target-genome TARGET_GENOME
+    >                        Genome sequence FASTA filepath for target species
+      -f2 NONTARGET_GENOME, --nontarget-genome NONTARGET_GENOME
+                            Genome sequence FASTA filepath for species to be
+                            filtered out prior to mapping. (optional)
+      -g1 TARGET_GFF, --target-annotations TARGET_GFF
+                            Genome annotation GFF
+      -g2 NONTARGET_GFF, --nontarget-annotations NONTARGET_GFF
+                            Genome annotation GFF
+      -u UORF_GFF, --gff-uorf-annotations UORF_GFF
+                            GFF containing possible uORFs; generated during final
+                            steps of processing and can be passed back in to re-
+                            perform analyses treating these locations as putative
+                            ORFs.
+      -s SPLICED_LEADER, --sl-sequence SPLICED_LEADER
+                            Spliced leader DNA sequence
+      --exclude-internal-sl-matches
+                            Only allow matches with the SL at the upstreamend of a
+                            read.
+      --exclude-internal-polya-matches
+                            Only allow matches with the Poly(A) tail at
+                            thedownstream end of a read.
+      --max-dist-from-edge MAX_DIST_FROM_EDGE
+                            For unanchored searches, what is the maximum distance
+                            from the edge of the read for a feature match to be
+                            considered.
+      -m MIN_SL_LENGTH, --min-sl-length MIN_SL_LENGTH
+                            Minimum length of SL match (default=10)
+      -p MIN_POLYA_LENGTH, --min-polya-length MIN_POLYA_LENGTH
+                            Minimum length of Poly-A match (default=10)
+      -w WINDOW_SIZE, --window-size WINDOW_SIZE
+                            Number of bases up or downstream of feature toscan for
+                            related genes (default=15000)
+      -x MINIMUM_DIFFERENCES, --minimum-differences MINIMUM_DIFFERENCES
+                            Minimum number of differences from genomic sequence
+                            for a hit to be considered real. (default=2)
+      --num-threads NUM_THREADS
+                            Number of threads to use (default=4).
 
 ### Example 1
 
 Scan *T. cruzi* reads, using the default arguments and filtering out reads that
 align to the human genome
 
-> ./utr_analysis.py                                              \
->    -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
->    -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
->    -f1 TriTrypDB-9.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
->    -f2 hg38.fasta                                              \
->    -g TrypDB-9.0_TcruziCLBrenerEsmeraldo-like.gff              \
+    utr_analysis.py                                              \
+       -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
+       -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
+       -f1 TriTrypDB-9.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
+       -f2 hg38.fasta                                              \
+       -g TrypDB-9.0_TcruziCLBrenerEsmeraldo-like.gff              \
 
 ### Example 2
 
@@ -144,18 +144,18 @@ set and provided with a file containing putative novel ORFs for which RNA-Seq
 support was found. This file can be generated by running the same command 
 without the gff-uorf-annotations flag set.
 
-> utr_analysis.py                                                           \
->    -i $RAW/lmajor/input/\*/processed/\*.fastq.gz                          \
->    -f1 $REF/TriTrypDB-9.0_LmajorFriedlin_Genome.fasta                     \
->    -f2 $REF/mm10.fasta                                                    \
->    -g1 $REF/lmajor_friedlin/annotation/TriTrypDB-9.0_LmajorFriedlin.gff   \
->    -s AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG                             \
->    --min-sl-length 4                                                      \
->    --min-polya-length 4                                                   \
->    --minimum-differences 2                                                \   
->    --num-threads 2                                                        \  
->    --build-directory $SCRATCH/utr_analysis/lmajor                         \
->    --gff-uorf-annotations detected_orfs.gff                               \
+    utr_analysis.py                                                           \
+       -i $RAW/lmajor/input/\*/processed/\*.fastq.gz                          \
+       -f1 $REF/TriTrypDB-9.0_LmajorFriedlin_Genome.fasta                     \
+       -f2 $REF/mm10.fasta                                                    \
+       -g1 $REF/lmajor_friedlin/annotation/TriTrypDB-9.0_LmajorFriedlin.gff   \
+       -s AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG                             \
+       --min-sl-length 4                                                      \
+       --min-polya-length 4                                                   \
+       --minimum-differences 2                                                \   
+       --num-threads 2                                                        \  
+       --build-directory $SCRATCH/utr_analysis/lmajor                         \
+       --gff-uorf-annotations detected_orfs.gff                               \
 
 Note that in the above example, the wildcard ("glob") string specifying the
 location of input reads, the asterisks have been escaped using a backspace.
