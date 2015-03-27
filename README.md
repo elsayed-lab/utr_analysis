@@ -129,7 +129,7 @@ Usage
 Scan *T. cruzi* reads, using the default arguments and filtering out reads that
 align to the human genome
 
-    utr_analysis.py                                              \
+    utr_analysis.py                                                \
        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
        -f1 TriTrypDB-9.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
