@@ -81,12 +81,12 @@ Usage
     optional arguments:
       -h, --help            show this help message and exit
       -i INPUT_READS, --input-reads INPUT_READS
-    >                        RNA-Seq FASTQ or gzipped FASTQ glob string ora txt
-    >                        file containing filepaths to the samplesto be used
-    >  -d BUILD_DIRECTORY, --build-directory BUILD_DIRECTORY
-    >                        Directory to save output to
-    >  -f1 TARGET_GENOME, --target-genome TARGET_GENOME
-    >                        Genome sequence FASTA filepath for target species
+                            RNA-Seq FASTQ or gzipped FASTQ glob string ora txt
+                            file containing filepaths to the samplesto be used
+      -d BUILD_DIRECTORY, --build-directory BUILD_DIRECTORY
+                            Directory to save output to
+      -f1 TARGET_GENOME, --target-genome TARGET_GENOME
+                            Genome sequence FASTA filepath for target species
       -f2 NONTARGET_GENOME, --nontarget-genome NONTARGET_GENOME
                             Genome sequence FASTA filepath for species to be
                             filtered out prior to mapping. (optional)
