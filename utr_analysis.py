@@ -1457,7 +1457,7 @@ reverse_sl = str(Seq.Seq(args.spliced_leader).reverse_complement())
 
 # Get a list of sample ids ids
 # @TODO: Generalize handling of sample ids
-input_regex = re.compile(r'.*(HPGL[0-9]+).*')
+input_regex = re.compile(r'.*(HPGL[0-9]*).*')
 sample_ids = []
 
 # Get samples to be parsed
@@ -1474,7 +1474,7 @@ input_globstr = (
 )
 for filepath in glob.glob(input_globstr):
     # get hpgl id
-    sample_ids_all.append(re.match('.*(HPGL[0-9]+).*', filepath).groups()[0])
+    sample_ids_all.append(re.match('.*(HPGL[0-9]*).*', filepath).groups()[0])
 
 
 # create subdirs based on matching parameters
@@ -1692,7 +1692,7 @@ def check_genome_fastas():
 @follows(check_for_bowtie_indices)
 @follows(check_genome_fastas)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?(HPGL[0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
@@ -1747,7 +1747,7 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
 #-----------------------------------------------------------------------------
 @follows(filter_nontarget_reads)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?(HPGL[0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.filter_genomic_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_genomic_reads(input_file, output_file, sample_id, read_num):
@@ -1812,7 +1812,7 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
 #      boundaries of the match, and thus, where to trim reads.
 #-----------------------------------------------------------------------------
 @transform(filter_genomic_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).filter_genomic_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).filter_genomic_reads'),
            r'%s/\2/ruffus/\2_\3.find_sl_reads' % sl_build_dir,
            r'\2', r'\3')
 def find_sl_reads(input_file, output_file, sample_id, read_num):
@@ -1859,7 +1859,7 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
 @transform(find_sl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_sl_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).find_sl_reads'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, sample_id, read_num):
@@ -1877,7 +1877,7 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
 # locations (e.g. not inside a CDS.)
 #-----------------------------------------------------------------------------
 @transform(map_sl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_sl_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).map_sl_reads'),
            r'\1/\2_\3.compute_sl_coordinates',
            r'\2', r'\3')
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
@@ -1896,7 +1896,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_sl_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?(HPGL[0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_rsl_reads' % rsl_build_dir,
            r'\2', r'\4')
 def find_rsl_reads(input_file, output_file, sample_id, read_num):
@@ -1935,7 +1935,7 @@ def find_rsl_reads(input_file, output_file, sample_id, read_num):
 # RSL Step 2
 #
 @transform(find_rsl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_rsl_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).find_rsl_reads'),
            r'\1/\2_\3.map_rsl_reads',
            r'\2', r'\3')
 def map_rsl_reads(input_file, output_file, sample_id, read_num):
@@ -1947,7 +1947,7 @@ def map_rsl_reads(input_file, output_file, sample_id, read_num):
 # RSL Step 3
 #
 @transform(map_rsl_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_rsl_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).map_rsl_reads'),
            r'\1/\2_\3.compute_rsl_coordinates',
            r'\2', r'\3')
 def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
@@ -1965,7 +1965,7 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_rsl_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?(HPGL[0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
            r'\2', r'\4')
 def find_polya_reads(input_file, output_file, sample_id, read_num):
@@ -1992,7 +1992,7 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
 # Poly(A) Step 2
 #
 @transform(find_polya_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polya_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).find_polya_reads'),
            r'\1/\2_\3.map_polya_reads',
            r'\2', r'\3')
 def map_polya_reads(input_file, output_file, sample_id, read_num):
@@ -2004,7 +2004,7 @@ def map_polya_reads(input_file, output_file, sample_id, read_num):
 # Poly(A) Step 3
 #
 @transform(map_polya_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polya_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).map_polya_reads'),
            r'\1/\2_\3.compute_polya_coordinates',
            r'\2', r'\3')
 def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
@@ -2022,7 +2022,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_polya_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?(HPGL[0-9]+)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?(HPGL[0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
            r'\2', r'\4')
 def find_polyt_reads(input_file, output_file, sample_id, read_num):
@@ -2050,7 +2050,7 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
 # Poly(T) Step 2
 #
 @transform(find_polyt_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).find_polyt_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).find_polyt_reads'),
            r'\1/\2_\3.map_polyt_reads',
            r'\2', r'\3')
 def map_polyt_reads(input_file, output_file, sample_id, read_num):
@@ -2062,7 +2062,7 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
 # Poly(T) Step 3
 #
 @transform(map_polyt_reads,
-           regex(r'^(.*)/(HPGL[0-9]+)_(R[12]).map_polyt_reads'),
+           regex(r'^(.*)/(HPGL[0-9]*)_(R[12]).map_polyt_reads'),
            r'\1/\2_\3.compute_polyt_coordinates',
            r'\2', r'\3')
 def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
@@ -2082,7 +2082,7 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
 @merge(compute_polyt_coordinates, '%s/finished' % combined_output_dir)
 def combine_results(input_files, output_file):
     # Convert input ruffus tasks to corresponding GFF filepaths
-    regex = '.*/(HPGL[0-9]+)_(R[1-2]).*'
+    regex = '.*/(HPGL[0-9]*)_(R[1-2]).*'
 
     # Combine spliced leader output
     logging.info("# Combining spliced leader coordinates output")
