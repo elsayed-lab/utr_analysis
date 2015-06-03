@@ -15,13 +15,14 @@ sorted_gff=${1/.*}_sorted.gff
 outfile=${1/.*}_sorted.bedgraph
 
 # remove ncRNAs in L. major
-#noncrnas=${1/.*}_no_ncrnas.gff
-#sorted_gff=${1/.*}_no_ncrnas_sorted.gff
-#grep -v "LmjF\.[0-9]*\.5\?[a-zA-Z][\.]*" ${1} > $noncrnas
-#igvtools sort $noncrnas $sorted_gff
+ncrnas=${1/.*}_no_ncrnas.gff
+sorted_gff=${1/.*}_no_ncrnas_sorted.gff
+grep -v "LmjF\.[0-9]*\.5\?[a-zA-Z][\.]*" ${1} > $ncrnas
+igvtools sort $ncrnas $sorted_gff
+rm $ncrnas
 
 # let's first sort and index the GFF files for comparison
-igvtools sort ${1} $sorted_gff
+#igvtools sort ${1} $sorted_gff
 igvtools index $sorted_gff
 
 # remove unsorted version
@@ -37,3 +38,4 @@ echo 'track type=bedGraph' >> $outfile
 grep -v '^#' $sorted_gff | grep -v 'chromosome' |\
     awk '{print $1 "\t" ($4 - 1) "\t" $5 "\t" $6}' >> $outfile
 
+rm igv.log

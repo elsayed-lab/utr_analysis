@@ -102,11 +102,6 @@ def parse_input():
                         required=True, help='Genome annotation GFF')
     parser.add_argument('-g2', '--nontarget-annotations', dest='nontarget_gff',
                         help='Genome annotation GFF')
-    parser.add_argument('-u', '--gff-uorf-annotations', dest='uorf_gff',
-                        help=('GFF containing possible uORFs; generated during '
-                              'final steps of processing and can be passed '
-                              'back in to re-perform analyses treating these '
-                              'locations as putative ORFs.'))
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
                         required=True, help='Spliced leader DNA sequence',
                         default=None)
@@ -1245,56 +1240,6 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
                 ])
     fp.close()
 
-def output_unannotated_orfs(results, filepath):
-    """
-    Outputs a set of unannotated ORFs to a specified GFF file.
-
-    Parameters
-    ----------
-    results: dict
-        A nested dictionary containing the putative ORFs
-    filepath: str
-        Filepath to save results to.
-    """
-    fp = open(filepath, 'w')
-
-    # Write csv header
-    fp.write("##gff-version\t3\n")
-    fp.write("##feature-ontology\tsofa.obo\n")
-    fp.write("##attribute-ontology\tgff3_attributes.obo\n")
-    fp.write("#track name=unannotated_ORFs color='134,166,83'\n")
-
-    # Copy chromosome entries from primary GFF
-    #annotations_fp = open(args.target_gff)
-
-    #for line in annotations_fp:
-    #    if "\tchromosome\t" in line:
-    #        fp.write(line)
-    #annotations_fp.close()
-
-    # Create a CSV writer instance
-    writer = csv.writer(fp, delimiter='\t')
-
-    # Increment new ORFs
-    i = 0
-
-    # write output to csv
-    for chrnum in results:
-        for orf in results[chrnum]:
-            # gff3 attributes
-            orf_id = "ORF.%d" % i
-            attributes = "ID=%s;Name=%s;description=%s" % (
-                orf_id, orf_id, orf_id
-            )
-
-            # write entry
-            writer.writerow([
-                chrnum, "utr_analysis.py", "ORF",
-                orf[0], orf[1], '.', orf[2], '.', attributes
-            ])
-            i = i + 1
-    fp.close()
-
 def combine_gff_results(input_gffs):
     """Combines GFF output generated for each individual sample into a single
     combined file."""
@@ -1367,14 +1312,6 @@ def load_annotations():
     for entry in GFF.parse(annotations_fp):
         if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
             chromosomes[entry.id] = entry
-
-    # If file containing additional unannotated ORFs was specified, include
-    # those as well
-    if args.uorf_gff:
-        for ch in GFF.parse(open(args.uorf_gff)):
-            for feature in ch.features:
-                if feature.type == 'ORF':
-                    chromosomes[ch.id].features.append(feature)
 
     # clean up
     annotations_fp.close()
