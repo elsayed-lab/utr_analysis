@@ -743,7 +743,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
     genome = SeqIO.parse(args.target_genome, 'fasta')
     chr_sequences = {x.id:x for x in genome}
 
-    # Get chromosomes from GFF file
+    # Get chromosomes/contigs from GFF file
     chromosomes = load_annotations()
 
     # Create a dictionary to keep track of the coordinates.
@@ -1303,14 +1303,14 @@ def combine_gff_results(input_gffs):
 
 def load_annotations():
     """Loads genome annotations from specified GFF(s)."""
-    # Get chromosomes from GFF file
+    # Get chromosomes/contigs from GFF file
     chromosomes = {}
 
     # Load existing gene annotations
     annotations_fp = open(args.target_gff)
 
     for entry in GFF.parse(annotations_fp):
-        if len(entry.features) > 0 and entry.features[0].type == 'chromosome':
+        if len(entry.features) > 0 and entry.features[0].type in ['chromosome', 'contig']:
             chromosomes[entry.id] = entry
 
     # clean up
