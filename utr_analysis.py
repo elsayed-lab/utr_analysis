@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Utranslated Region (UTR) analysis
-Keith Hughitt
+Keith Hughitt (khughitt@umd.edu)
 
 Overview
 --------
@@ -13,19 +13,6 @@ poly-adenylation sites.
 A reference genome and CDS coordinates are required as input and will be used
 to map reads back after removing the spliced leader in order to determine the
 SL acceptor site.
-
-TODO
-----
-- For reads where feature was found in R2, discard R1 and just map R2
-  (see RIP notes)
-- Generate statistics/plot including:
-    - total number of reads (or number of reads mapped to pathogen)
-    - number of reads remaining after filtering (reads containing SL)
-    - distribution of SL fragment lengths
-    - distribution of UTR lengths
-    - average number of accepter sites per CDS
-- Compare above statistics across samples
-
 """
 import os
 import re
@@ -1392,9 +1379,9 @@ polyt_build_dir = os.path.join(
 # Create a reversed version of the SL sequence
 reverse_sl = str(Seq.Seq(args.spliced_leader).reverse_complement())
 
-# Get a list of sample ids ids
-# @TODO: Generalize handling of sample ids
-input_regex = re.compile(r'.*/([A-Z0-9]*)/.*')
+# Get a list of sample ids
+# e.g. /path/to/input/samples/sample01/...
+input_regex = re.compile(r'.*/(.*)/.*')
 sample_ids = []
 
 # Get samples to be parsed
@@ -1405,10 +1392,6 @@ for filename in filenames:
     if sample_id not in sample_ids:
         sample_ids.append(sample_id)
 
-# TESTING 2015/11/05
-print("SAMPLE IDS:")
-print(sample_ids)
-
 # list of ids including previously processed samples (used for final step)
 sample_ids_all = sample_ids
 input_globstr = (
@@ -1416,8 +1399,7 @@ input_globstr = (
 )
 for filepath in glob.glob(input_globstr):
     # get sample id
-    sample_ids_all.append(re.match('.*/([A-Z0-9]*)/.*', filepath).groups()[0])
-
+    sample_ids_all.append(re.match('.*/(.*)/.*', filepath).groups()[0])
 
 # create subdirs based on matching parameters
 shared_subdirs = ['ruffus',
@@ -1634,7 +1616,7 @@ def check_genome_fastas():
 @follows(check_for_bowtie_indices)
 @follows(check_genome_fastas)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([A-Z0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
@@ -1689,7 +1671,7 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
 #-----------------------------------------------------------------------------
 @follows(filter_nontarget_reads)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([A-Z0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.filter_genomic_reads' % shared_build_dir,
            r'\2', r'\4')
 def filter_genomic_reads(input_file, output_file, sample_id, read_num):
@@ -1754,7 +1736,7 @@ def filter_genomic_reads(input_file, output_file, sample_id, read_num):
 #      boundaries of the match, and thus, where to trim reads.
 #-----------------------------------------------------------------------------
 @transform(filter_genomic_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).filter_genomic_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).filter_genomic_reads'),
            r'%s/\2/ruffus/\2_\3.find_sl_reads' % sl_build_dir,
            r'\2', r'\3')
 def find_sl_reads(input_file, output_file, sample_id, read_num):
@@ -1801,7 +1783,7 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
 @transform(find_sl_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).find_sl_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).find_sl_reads'),
            r'\1/\2_\3.map_sl_reads',
            r'\2', r'\3')
 def map_sl_reads(input_file, output_file, sample_id, read_num):
@@ -1819,7 +1801,7 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
 # locations (e.g. not inside a CDS.)
 #-----------------------------------------------------------------------------
 @transform(map_sl_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).map_sl_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).map_sl_reads'),
            r'\1/\2_\3.compute_sl_coordinates',
            r'\2', r'\3')
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
@@ -1838,7 +1820,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_sl_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([A-Z0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_rsl_reads' % rsl_build_dir,
            r'\2', r'\4')
 def find_rsl_reads(input_file, output_file, sample_id, read_num):
@@ -1877,7 +1859,7 @@ def find_rsl_reads(input_file, output_file, sample_id, read_num):
 # RSL Step 2
 #
 @transform(find_rsl_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).find_rsl_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).find_rsl_reads'),
            r'\1/\2_\3.map_rsl_reads',
            r'\2', r'\3')
 def map_rsl_reads(input_file, output_file, sample_id, read_num):
@@ -1889,7 +1871,7 @@ def map_rsl_reads(input_file, output_file, sample_id, read_num):
 # RSL Step 3
 #
 @transform(map_rsl_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).map_rsl_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).map_rsl_reads'),
            r'\1/\2_\3.compute_rsl_coordinates',
            r'\2', r'\3')
 def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
@@ -1907,7 +1889,7 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_rsl_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([A-Z0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
            r'\2', r'\4')
 def find_polya_reads(input_file, output_file, sample_id, read_num):
@@ -1934,7 +1916,7 @@ def find_polya_reads(input_file, output_file, sample_id, read_num):
 # Poly(A) Step 2
 #
 @transform(find_polya_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).find_polya_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).find_polya_reads'),
            r'\1/\2_\3.map_polya_reads',
            r'\2', r'\3')
 def map_polya_reads(input_file, output_file, sample_id, read_num):
@@ -1946,7 +1928,7 @@ def map_polya_reads(input_file, output_file, sample_id, read_num):
 # Poly(A) Step 3
 #
 @transform(map_polya_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).map_polya_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).map_polya_reads'),
            r'\1/\2_\3.compute_polya_coordinates',
            r'\2', r'\3')
 def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
@@ -1964,7 +1946,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_polya_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([A-Z0-9]*)_(.*)(R[1-2])_(.+)\.fastq(\.gz)?'),
+           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
            r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
            r'\2', r'\4')
 def find_polyt_reads(input_file, output_file, sample_id, read_num):
@@ -1992,7 +1974,7 @@ def find_polyt_reads(input_file, output_file, sample_id, read_num):
 # Poly(T) Step 2
 #
 @transform(find_polyt_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).find_polyt_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).find_polyt_reads'),
            r'\1/\2_\3.map_polyt_reads',
            r'\2', r'\3')
 def map_polyt_reads(input_file, output_file, sample_id, read_num):
@@ -2004,7 +1986,7 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
 # Poly(T) Step 3
 #
 @transform(map_polyt_reads,
-           regex(r'^(.*)/([A-Z0-9]*)_(R[12]).map_polyt_reads'),
+           regex(r'^(.*)/(.*)_(R?[12]).map_polyt_reads'),
            r'\1/\2_\3.compute_polyt_coordinates',
            r'\2', r'\3')
 def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
@@ -2024,7 +2006,7 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
 @merge(compute_polyt_coordinates, '%s/finished' % combined_output_dir)
 def combine_results(input_files, output_file):
     # Convert input ruffus tasks to corresponding GFF filepaths
-    regex = '.*/([A-Z0-9]*)_(R[1-2]).*'
+    regex = '.*/(.*)_(R?[1-2]).*'
 
     # Combine spliced leader output
     logging.info("# Combining spliced leader coordinates output")
