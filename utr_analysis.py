@@ -214,7 +214,7 @@ def sort_and_index(base_output, log_handle):
     """Sorts and indexes .bam files using samtools"""
     # sort bam
     sort_cmd = 'samtools sort %s -o %s' % (
-        base_output + ".bam", base_output + "_sorted")
+        base_output + ".bam", base_output + "_sorted.bam")
     run_command(sort_cmd, log_handle)
 
     # delete unsorted verion

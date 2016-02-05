@@ -31,7 +31,7 @@ eval $TOPHAT_CMD
 
 # Sort and index output
 samtools sort -@ 12 ${OUTPUTDIR}/accepted_hits.bam \
-                    -o ${OUTPUTDIR}/accepted_hits_sorted
+                    -o ${OUTPUTDIR}/accepted_hits_sorted.bam
 samtools index ${OUTPUTDIR}/accepted_hits_sorted.bam
 
 #######################################
@@ -50,7 +50,7 @@ eval $TOPHAT_CMD
 
 # Sort and index output
 samtools sort -@ 12 ${OUTPUTDIR}/accepted_hits.bam \
-                    -o ${OUTPUTDIR}/accepted_hits_sorted
+                    -o ${OUTPUTDIR}/accepted_hits_sorted.bam
 samtools index ${OUTPUTDIR}/accepted_hits_sorted.bam
 
 #######################################
@@ -70,7 +70,7 @@ eval $TOPHAT_CMD
 
 # Sort and index output
 samtools sort -@ 12 ${OUTPUTDIR}/accepted_hits.bam \
-                    -o ${OUTPUTDIR}/accepted_hits_sorted
+                    -o ${OUTPUTDIR}/accepted_hits_sorted.bam
 samtools index ${OUTPUTDIR}/accepted_hits_sorted.bam
 
 #######################################
@@ -89,6 +89,6 @@ eval $TOPHAT_CMD
 
 # Sort and index output
 samtools sort -@ 12 ${OUTPUTDIR}/accepted_hits.bam \
-                    -o ${OUTPUTDIR}/accepted_hits_sorted
+                    -o ${OUTPUTDIR}/accepted_hits_sorted.bam
 samtools index ${OUTPUTDIR}/accepted_hits_sorted.bam
 
