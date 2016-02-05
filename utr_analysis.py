@@ -226,7 +226,7 @@ def run_command(cmd, log_handle, wait=True):
 def sort_and_index(base_output, log_handle):
     """Sorts and indexes .bam files using samtools"""
     # sort bam
-    sort_cmd = 'samtools sort %s %s' % (
+    sort_cmd = 'samtools sort %s -o %s' % (
         base_output + ".bam", base_output + "_sorted")
     run_command(sort_cmd, log_handle)
 

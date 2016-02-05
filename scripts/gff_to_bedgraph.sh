@@ -19,10 +19,11 @@ ncrnas=${1/.*}_no_ncrnas.gff
 sorted_gff=${1/.*}_no_ncrnas_sorted.gff
 grep -v "LmjF\.[0-9]*\.5\?[a-zA-Z][\.]*" ${1} > $ncrnas
 igvtools sort $ncrnas $sorted_gff
+
+#igvtools sort ${1} $sorted_gff
 rm $ncrnas
 
 # let's first sort and index the GFF files for comparison
-#igvtools sort ${1} $sorted_gff
 igvtools index $sorted_gff
 
 # remove unsorted version
