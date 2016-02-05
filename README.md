@@ -19,8 +19,6 @@ flow management.
 - Spliced leader sequence (for 5'UTR/SL analysis)
 - (**Optional**) Genome sequence for a second species that is not of interest but
    may be used to filter out reads, e.g. in a mixed transcriptome study (fasta)
-- (**Optional**) A GFF containing additional ORFs outside of the primary genome
-   annotations to be included when assigning acceptor sites.
 
 ### Goals
 
@@ -43,13 +41,15 @@ frequency for acceptor sites.
 3. Remove SL portion of sequence and map back to original genome -- site of
    mapping indicates location of splice acceptor site.
 
-Pre-requisites
---------------
+Requirements
+------------
 
-To use this pipeline, you need only run the included python script,
-"utr_analysis.py" -- no installation is required.
+### Software
 
-The pipeline does, however, depend on several other Python librarie:
+- Python 2.7
+- [Samtools](http://www.htslib.org/) (>= 1.3)
+
+### Python libraries
 
 - [Ruffus](http://www.ruffus.org.uk/)
 - [BioPython](http://biopython.org/wiki/Main_Page)
@@ -57,7 +57,7 @@ The pipeline does, however, depend on several other Python librarie:
 - [pysam](http://pysam.readthedocs.org/en/latest/)
 - [Distance](https://pypi.python.org/pypi/Distance/)
 
-To install these depencies using pip, run:
+To install these Python dependencies using pip, run:
 
     pip install ruffus biopython bcbio-gff pysam distance
 
@@ -68,7 +68,7 @@ Usage
 
     usage: utr_analysis.py [-h] -i INPUT_READS -d BUILD_DIRECTORY -f1
                            TARGET_GENOME [-f2 NONTARGET_GENOME] -g1 TARGET_GFF
-                           [-g2 NONTARGET_GFF] [-u UORF_GFF] -s SPLICED_LEADER
+                           [-g2 NONTARGET_GFF] -s SPLICED_LEADER
                            [--exclude-internal-sl-matches]
                            [--exclude-internal-polya-matches]
                            [--max-dist-from-edge MAX_DIST_FROM_EDGE]
@@ -94,11 +94,6 @@ Usage
                             Genome annotation GFF
       -g2 NONTARGET_GFF, --nontarget-annotations NONTARGET_GFF
                             Genome annotation GFF
-      -u UORF_GFF, --gff-uorf-annotations UORF_GFF
-                            GFF containing possible uORFs; generated during final
-                            steps of processing and can be passed back in to re-
-                            perform analyses treating these locations as putative
-                            ORFs.
       -s SPLICED_LEADER, --sl-sequence SPLICED_LEADER
                             Spliced leader DNA sequence
       --exclude-internal-sl-matches
