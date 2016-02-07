@@ -213,12 +213,12 @@ def run_command(cmd, log_handle, wait=True):
 def sort_and_index(base_output, log_handle):
     """Sorts and indexes .bam files using samtools"""
     # sort bam
-    sort_cmd = 'samtools sort %s -o %s' % (
+    sort_cmd = 'samtools sort %s -n -o %s' % (
         base_output + ".bam", base_output + "_sorted.bam")
     run_command(sort_cmd, log_handle)
 
     # delete unsorted verion
-    os.remove(base_output + ".bam")
+    #os.remove(base_output + ".bam")
 
     # index bam
     index_cmd = 'samtools index %s' % (base_output + '_sorted.bam')
@@ -391,7 +391,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         num_unmapped = num_lines(bam_input) / 2
 
         # delete uneeded accepted_hits files
-        os.remove(os.path.join(tophat_dir, "accepted_hits_sorted.bam"))
+        #os.remove(os.path.join(tophat_dir, "accepted_hits_sorted.bam"))
 
         log_handle.info(
             "# Ignoring %d reads which mapped to specified genome (%d remaining)" %
@@ -1381,14 +1381,13 @@ reverse_sl = str(Seq.Seq(args.spliced_leader).reverse_complement())
 
 # Get a list of sample ids
 # e.g. /path/to/input/samples/sample01/...
-input_regex = re.compile(r'.*/(.*)/.*')
+input_regex = re.compile(r'^(.*/)?([^_]*)_(R?[1-2])')
 sample_ids = []
 
 # Get samples to be parsed
 filenames = glob.glob(args.input_reads)
 for filename in filenames:
-    print(filename)
-    sample_id = re.match(input_regex, filename).groups()[0]
+    sample_id = re.match(input_regex, filename).groups()[1]
     if sample_id not in sample_ids:
         sample_ids.append(sample_id)
 
@@ -1518,13 +1517,12 @@ for sample_id in sample_ids_all:
 # componenets of the regular expression used in this case is provided as
 # an example below.
 #
-# Ex. "$RAW/tcruzir21/HPGL0121/processed/HPGL0121_R1_filtered.fastq"
+# Ex. "$RAW/tcruzir21/Sample0121/processed/Sample0121_R1_filtered.fastq"
 #
-#    \1 - directory
-#    \2 - HPGLxxxx
-#    \3 - _anything_between_id_and_read_num_
-#    \4 - R1/R2
-#    \5 - _anything_after_read_num_
+#    \1 - directory                   ($RAW/tcruzir21/Sample0121/processed/)
+#    \2 - sample id / filename prefix (Sample0121)
+#    \3 - read number                 (R1)
+#    \4 - _anything_after_read_num_   (filtered)
 #
 #-----------------------------------------------------------------------------
 
@@ -1616,9 +1614,9 @@ def check_genome_fastas():
 @follows(check_for_bowtie_indices)
 @follows(check_genome_fastas)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.filter_nontarget_reads' % shared_build_dir,
-           r'\2', r'\4')
+           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
+           r'%s/\2/ruffus/\2_\3.filter_nontarget_reads' % shared_build_dir,
+           r'\2', r'\3')
 def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
     # If we are only mapping to a single genome, skip this step
     if not args.nontarget_genome:
@@ -1671,9 +1669,9 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
 #-----------------------------------------------------------------------------
 @follows(filter_nontarget_reads)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.filter_genomic_reads' % shared_build_dir,
-           r'\2', r'\4')
+           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
+           r'%s/\2/ruffus/\2_\3.filter_genomic_reads' % shared_build_dir,
+           r'\2', r'\3')
 def filter_genomic_reads(input_file, output_file, sample_id, read_num):
     # We only need to map once for each mated pair
     if read_num == "R2":
@@ -1820,9 +1818,9 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_sl_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.find_rsl_reads' % rsl_build_dir,
-           r'\2', r'\4')
+           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
+           r'%s/\2/ruffus/\2_\3.find_rsl_reads' % rsl_build_dir,
+           r'\2', r'\3')
 def find_rsl_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
     # First-stage filter string
@@ -1889,9 +1887,9 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_rsl_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.find_polya_reads' % polya_build_dir,
-           r'\2', r'\4')
+           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
+           r'%s/\2/ruffus/\2_\3.find_polya_reads' % polya_build_dir,
+           r'\2', r'\3')
 def find_polya_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
     polya_filter = 'A' * args.min_polya_length
@@ -1946,9 +1944,9 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 #
 @follows(compute_polya_coordinates)
 @transform(args.input_reads,
-           regex(r'^(.*/)?([^_]*)_?([^_]*)?(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\4.find_polyt_reads' % polyt_build_dir,
-           r'\2', r'\4')
+           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
+           r'%s/\2/ruffus/\2_\3.find_polyt_reads' % polyt_build_dir,
+           r'\2', r'\3')
 def find_polyt_reads(input_file, output_file, sample_id, read_num):
     """Matches reads with possible Poly(T) tail fragment"""
     # Match reads with at least n T's at the beginning of the read; For now
