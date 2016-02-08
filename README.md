@@ -119,26 +119,30 @@ Usage
       --num-threads NUM_THREADS
                             Number of threads to use (default=4).
 
-### Input reads directory structure
+### Input read filename requirements
 
-In order for the UTR analysis pipeline to detect individual samples, input
-reads are currently required to reside in separate directories. Further, each
-input sample file must include the pair-end read number (e.g. "_1" or "_R1")
-and a the file extension ".fastq" in all lower-case. Optionally, the files may
-be gzip-compressed with the file extension ".fastq.gz".
+Each input sample file must include the pair-end read number (e.g. "_1" or
+"_R1") and a the file extension ".fastq" in all lower-case. Optionally, the
+files may be gzip-compressed with the file extension ".fastq.gz".
 
 For example, a valid directory structure may look like:
 
-    ├── sample01
+    ├── dir01
     │   ├── rnaseq_sample01_1.fastq
     │   └── rnaseq_sample01_2.fastq
-    └── sample02
-        ├── rnaseq_sample02_1.fastq
-        └── rnaseq_sample02_2.fastq
+    ├── dir02
+    │   ├── rnaseq_sample02_1.fastq
+    │   └── rnaseq_sample02_2.fastq
+    └── etc
 
-You can use whatever sample naming convention you prefer, but for consistency,
-it is recommended that you use the same naming conventions for the
-sub-directories and the identifiers within each of the filenames.
+or:
+
+    ─ samples
+            ├── rnaseq_sample01_1.fastq
+            ├── rnaseq_sample01_2.fastq
+            ├── rnaseq_sample02_1.fastq
+            ├── rnaseq_sample02_2.fastq
+            └── etc
 
 ### Example 1
 
