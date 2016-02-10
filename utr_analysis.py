@@ -1381,7 +1381,7 @@ reverse_sl = str(Seq.Seq(args.spliced_leader).reverse_complement())
 
 # Get a list of sample ids
 # e.g. /path/to/input/samples/sample01/...
-input_regex = re.compile(r'^(.*/)?([^_]*)_(R?[1-2])')
+input_regex = re.compile(r'^(.*/)?(.*)_(R?[1-2])')
 sample_ids = []
 
 # Get samples to be parsed
