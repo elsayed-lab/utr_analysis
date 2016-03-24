@@ -97,11 +97,11 @@ Usage
       -s SPLICED_LEADER, --sl-sequence SPLICED_LEADER
                             Spliced leader DNA sequence
       --exclude-internal-sl-matches
-                            Only allow matches with the SL at the upstreamend of a
+                            Only allow matches with the SL at the upstream end of a
                             read.
       --exclude-internal-polya-matches
                             Only allow matches with the Poly(A) tail at
-                            thedownstream end of a read.
+                            the downstream end of a read.
       --max-dist-from-edge MAX_DIST_FROM_EDGE
                             For unanchored searches, what is the maximum distance
                             from the edge of the read for a feature match to be
@@ -111,7 +111,7 @@ Usage
       -p MIN_POLYA_LENGTH, --min-polya-length MIN_POLYA_LENGTH
                             Minimum length of Poly-A match (default=10)
       -w WINDOW_SIZE, --window-size WINDOW_SIZE
-                            Number of bases up or downstream of feature toscan for
+                            Number of bases up or downstream of feature to scan for
                             related genes (default=15000)
       -x MINIMUM_DIFFERENCES, --minimum-differences MINIMUM_DIFFERENCES
                             Minimum number of differences from genomic sequence

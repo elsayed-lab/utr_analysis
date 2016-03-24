@@ -1,7 +1,7 @@
 #!/bin/env python2
 # -*- coding: utf-8 -*-
 """
-Utranslated Region (UTR) analysis
+Trypanosomatid Utranslated Region (UTR) analysis Pipeline
 Keith Hughitt (khughitt@umd.edu)
 
 Overview
@@ -93,10 +93,10 @@ def parse_input():
                         required=True, help='Spliced leader DNA sequence',
                         default=None)
     parser.add_argument('--exclude-internal-sl-matches',
-                        help=('Only allow matches with the SL at the upstream'
+                        help=('Only allow matches with the SL at the upstream '
                               'end of a read.'), action='store_true')
     parser.add_argument('--exclude-internal-polya-matches',
-                        help=('Only allow matches with the Poly(A) tail at the'
+                        help=('Only allow matches with the Poly(A) tail at the '
                               'downstream end of a read.'), action='store_true')
     parser.add_argument('--max-dist-from-edge',
                         help=('For unanchored searches, what is the maximum '
@@ -107,7 +107,7 @@ def parse_input():
     parser.add_argument('-p', '--min-polya-length', default=10, type=int,
                         help='Minimum length of Poly-A match (default=10)')
     parser.add_argument('-w', '--window-size', default=15000, type=int,
-                        help=('Number of bases up or downstream of feature to'
+                        help=('Number of bases up or downstream of feature to '
                               'scan for related genes (default=15000)'))
     parser.add_argument('-x', '--minimum-differences', default=2, type=int,
                         help=('Minimum number of differences from genomic '
