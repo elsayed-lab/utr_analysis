@@ -1010,16 +1010,30 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             trimmed_genome_seq, matched_seq, matched_genome_seq, acceptor_site
         ])
 
+        #
         # Increment site count and save distance from gene
+        #
+        # count: number of reads supporting a given site
+        # distance: distance between the site and the nearest CDS
+        # seq_distance: hamming distance between matched sl/poly(A) sequence
+        #               and the sequence at the genome for that location
+        # match_length: length of SL/Poly(A) sequence matched
+        # strand: strand of mapped site
+        # description: gene description from original GFF
+        #
         if not acceptor_site in results[chromosome][gene['id']]:
             results[chromosome][gene['id']][acceptor_site] = {
                 "count": 1,
                 "distance": gene['distance'],
+                "seq_distance": match_dist,
+                "match_length": len(matched_seq),
                 "strand": strand,
                 "description": gene['description']
             }
         else:
             results[chromosome][gene['id']][acceptor_site]['count'] += 1
+            results[chromosome][gene['id']][acceptor_site]['seq_distance'] += match_dist
+            results[chromosome][gene['id']][acceptor_site]['count'] += len(matched_seq)
 
     # record number of good and bad reads
     loggers[sample_id][feature_name][read_num].info(
@@ -1212,8 +1226,10 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
         for gene_id in results[chrnum]:
             for i, acceptor_site in enumerate(results[chrnum][gene_id], 1):
                 # gff3 attributes
-                attributes = "ID=%s.%s.%d;Name=%s;description=%s" % (
+                attributes = "ID=%s.%s.%d;Name=%s;seq_dist=%d;match_len=%d;description=%s" % (
                     gene_id, feature_name, i, gene_id,
+                    results[chrnum][gene_id][acceptor_site]['seq_distance']
+                    results[chrnum][gene_id][acceptor_site]['match_length']
                     results[chrnum][gene_id][acceptor_site]['description']
                 )
 
