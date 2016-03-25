@@ -1228,8 +1228,8 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
                 # gff3 attributes
                 attributes = "ID=%s.%s.%d;Name=%s;seq_dist=%d;match_len=%d;description=%s" % (
                     gene_id, feature_name, i, gene_id,
-                    results[chrnum][gene_id][acceptor_site]['seq_distance']
-                    results[chrnum][gene_id][acceptor_site]['match_length']
+                    results[chrnum][gene_id][acceptor_site]['seq_distance'],
+                    results[chrnum][gene_id][acceptor_site]['match_length'],
                     results[chrnum][gene_id][acceptor_site]['description']
                 )
 
