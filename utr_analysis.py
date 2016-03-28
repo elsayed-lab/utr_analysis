@@ -965,8 +965,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             # Make sure that for the region matched, there are at least n
             # differences between the match and the corresponding genomic
             # sequence (slower)
-            match_dist = distance.hamming(matched_seq, matched_genome_seq)
-            if match_dist < args.minimum_differences:
+            seq_dist = distance.hamming(matched_seq, matched_genome_seq)
+            if seq_dist < args.minimum_differences:
                 continue
         except:
             # occurs when sl is smaller than genome/trimed_portion
@@ -1015,9 +1015,9 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         #
         # count: number of reads supporting a given site
         # distance: distance between the site and the nearest CDS
-        # seq_distance: hamming distance between matched sl/poly(A) sequence
-        #               and the sequence at the genome for that location
-        # match_length: length of SL/Poly(A) sequence matched
+        # seq_dist: hamming distance between matched sl/poly(A) sequence
+        #           and the sequence at the genome for that location
+        # match_len: length of SL/Poly(A) sequence matched
         # strand: strand of mapped site
         # description: gene description from original GFF
         #
@@ -1025,14 +1025,14 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
             results[chromosome][gene['id']][acceptor_site] = {
                 "count": 1,
                 "distance": gene['distance'],
-                "seq_distance": match_dist,
-                "match_length": len(matched_seq),
+                "seq_dist": seq_dist,
+                "match_len": len(matched_seq),
                 "strand": strand,
                 "description": gene['description']
             }
         else:
             results[chromosome][gene['id']][acceptor_site]['count'] += 1
-            results[chromosome][gene['id']][acceptor_site]['seq_distance'] += match_dist
+            results[chromosome][gene['id']][acceptor_site]['seq_dist'] += seq_dist
             results[chromosome][gene['id']][acceptor_site]['count'] += len(matched_seq)
 
     # record number of good and bad reads
@@ -1228,8 +1228,8 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
                 # gff3 attributes
                 attributes = "ID=%s.%s.%d;Name=%s;seq_dist=%d;match_len=%d;description=%s" % (
                     gene_id, feature_name, i, gene_id,
-                    results[chrnum][gene_id][acceptor_site]['seq_distance'],
-                    results[chrnum][gene_id][acceptor_site]['match_length'],
+                    results[chrnum][gene_id][acceptor_site]['seq_dist'],
+                    results[chrnum][gene_id][acceptor_site]['match_len'],
                     results[chrnum][gene_id][acceptor_site]['description']
                 )
 
@@ -1278,12 +1278,21 @@ def combine_gff_results(input_gffs):
             strand = row['strand']
 
             # Parse GFF attributes field
-            # Example: ID=LmjF.31.ncRNA1.sl.8;Name=LmjF.31.001;description=unspecified
+            # Example:
+            # 'ID=TcCLB.507939.50.sl.2;Name=TcCLB.507939.50;seq_dist=10;
+            #  match_len=15;description=hypothetical+protein,+conserved'
             parts = row['description'].split(';')
 
-            # Parse gene name and description from attributes
-            gene = parts[1][5:]
-            description = parts[-1][12:]
+            NAME_IDX = 1
+            SEQDIST_IDX = 2
+            MATCHLEN_IDX = 3
+            DESC_IDX = 4
+
+            # Parse individual attributes
+            gene = parts[NAME_IDX].split('=').pop()
+            seq_dist = int(parts[SEQDIST_IDX].split('=').pop())
+            match_len = int(parts[MATCHLEN_IDX].split('=').pop())
+            description = parts[DESC_IDX].split('=').pop()
 
             # Add to output dictionary
             if not chromosome in results:
@@ -1295,11 +1304,15 @@ def combine_gff_results(input_gffs):
             if not acceptor_site in results[chromosome][gene]:
                 results[chromosome][gene][acceptor_site] = {
                     "count": count,
+                    "seq_dist": seq_dist,
+                    "match_len": match_len,
                     "strand": strand,
                     "description": description
                 }
             else:
                 results[chromosome][gene][acceptor_site]['count'] += count
+                results[chromosome][gene][acceptor_site]['seq_dist'] += seq_dist
+                results[chromosome][gene][acceptor_site]['match_len'] += match_len
 
     # Return combined results
     return results
