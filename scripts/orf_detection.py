@@ -149,61 +149,69 @@ def parse_input():
     # return input arguments
     return (fasta, gff, min_length)
 
-def find_orfs(seq, min_protein_length, strand=1, trans_table=1):
-    """
-    Finds ORFs of a specified minimum length in a SeqRecord.
+    def find_orfs(seq, min_protein_length, strand=1, trans_table=1,
+                  ignore_ambiguous_orfs=True):
+        """
+        Finds ORFs of a specified minimum protein length in a SeqRecord.
 
-    Based on: http://biopython.org/DIST/docs/tutorial/Tutorial.html#sec360
-    """
-    answer = []
-    seq_len = len(seq)
+        Based on: http://biopython.org/DIST/docs/tutorial/Tutorial.html#sec360
+        """
+        answer = []
+        seq_len = len(seq)
 
-    # Get sequence associated with the specified location and strand
-    if strand == 1:
-        dna_seq = seq
-    else:
-        dna_seq = seq.reverse_complement()
+        # Get sequence associated with the specified location and strand
+        if strand == 1:
+            dna_seq = seq
+        else:
+            dna_seq = seq.reverse_complement()
 
-    for frame in range(3):
-        trans = str(dna_seq[frame:].translate(trans_table))
-        trans_len = len(trans)
-        aa_start = 0
-        aa_end = 0
+        for frame in range(3):
+            trans = str(dna_seq[frame:].translate(trans_table))
+            trans_len = len(trans)
+            aa_start = 0
+            aa_end = 0
 
-        # Iterate through ORFS in reading frame
-        while aa_start < trans_len:
-            # Set end counter to position of next stop codon
-            aa_start = trans.find("M", aa_start)
-            aa_end = trans.find("*", aa_start)
+            # Iterate through ORFS in reading frame
+            while aa_start < trans_len:
+                # Set end counter to position of next stop codon
+                aa_start = trans.find("M", aa_start)
+                aa_end = trans.find("*", aa_start)
 
-            # If no start or stop codons found, stop here
-            if aa_start == -1 or aa_end == -1:
-                break
+                # If no start or stop codons found, stop here
+                if aa_start == -1 or aa_end == -1:
+                    break
 
-            # extend stop codon until ORF is of sufficient length
-            while (aa_end - aa_start < min_protein_length) and aa_end > -1:
-                aa_end = trans.find("*", aa_end + 1)
+                if (aa_end < aa_start):
+                    raise Exception('wtf')
 
-            # If no ORFs of sufficent size found, stop here
-            if aa_end == -1:
-                break
+                # Compute coordinates of ORF
+                if strand == 1:
+                    start = frame + aa_start * 3
+                    end = min(seq_len, frame + aa_end * 3 + 3)
+                else:
+                    start = seq_len - frame - aa_end * 3 - 3
+                    end = seq_len - frame - aa_start * 3
 
-            # Compute coordinates of ORF
-            if strand == 1:
-                start = frame + aa_start * 3
-                end = min(seq_len, frame + aa_end * 3 + 3)
-            else:
-                start = seq_len - frame - aa_end * 3 - 3
-                end = seq_len - frame - aa_start * 3
+                # Add to output
+                str_strand = "+" if strand == 1 else '-'
 
-            # Add to output
-            str_strand = "+" if strand == 1 else '-'
-            answer.append((start, end, str_strand))
+                # Check to make sure ORF doesn't contain a bunch of N's
+                if ignore_ambiguous_orfs:
+                    num_unknown = trans[aa_start:aa_end].count('X')
+                    if (num_unknown / (aa_end - aa_start)) > 0.25:
+                        aa_start = aa_end + 1
+                        continue
 
-            # increment start counter and continue
-            aa_start = aa_end + 1
-    answer.sort()
-    return answer
+                # increment start counter
+                aa_start = aa_end + 1
+
+                # Add ORF coordinates and continue 
+                answer.append((start, end, str_strand))
+
+        # Sort results
+        answer.sort()
+
+        return answer
 
 if __name__ == "__main__":
     main()
