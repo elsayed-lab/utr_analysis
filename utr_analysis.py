@@ -98,10 +98,15 @@ def parse_input():
     parser.add_argument('--exclude-internal-polya-matches',
                         help=('Only allow matches with the Poly(A) tail at the '
                               'downstream end of a read.'), action='store_true')
+    parser.add_argument('--minimum-trimmed-length',
+                        help=('The minimum read length allowed after SL/Poly(A)
+                               trimming has been performed. (default=18)'),
+                        default=18)
     parser.add_argument('--max-dist-from-edge',
                         help=('For unanchored searches, what is the maximum '
                         'distance from the edge of the read for a feature '
-                        'match to be considered.'), default=30)
+                        'match to be considered (default=unlimited).'),
+                        default=[])
     parser.add_argument('-m', '--min-sl-length', default=10, type=int,
                         help='Minimum length of SL match (default=10)')
     parser.add_argument('-p', '--min-polya-length', default=10, type=int,
@@ -383,8 +388,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         # map reads to genome using tophat
         log_handle.info("# Mapping against %s" % os.path.basename(genome))
         ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
-                         read_mismatches=read_mismatches, gff=gff,
-                         extra_args='--no-mixed')
+                         read_mismatches=read_mismatches, gff=gff)
 
         # number of reads before filtering
         num_reads_total = num_lines(r1) / 4
@@ -576,8 +580,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
                             "+",
                             read[QUALITY_IDX][:match_start]]
 
-        # skip reads that are less than 36 bases after trimming
-        if len(trimmed_read[SEQUENCE_IDX]) < 36:
+        # skip reads that are less than the required amount after trimming
+        if len(trimmed_read[SEQUENCE_IDX]) < args.minimum_trimmed_length:
             continue
 
         # length of portion trimmed off
