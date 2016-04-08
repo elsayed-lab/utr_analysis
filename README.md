@@ -25,7 +25,7 @@ flow management.
 #### Spliced leader analysis
 
 Generate a table containing the location of primary and alternative splice
-acceptor sites for each gene (and condition/sample) along with the usage 
+acceptor sites for each gene (and condition/sample) along with the usage
 frequency for acceptor sites.
 
 #### Poly-adenylation analysis
@@ -67,58 +67,73 @@ Usage
 ### Overview
 
     usage: utr_analysis.py [-h] -i INPUT_READS -d BUILD_DIRECTORY -f1
-                           TARGET_GENOME [-f2 NONTARGET_GENOME] -g1 TARGET_GFF
-                           [-g2 NONTARGET_GFF] -s SPLICED_LEADER
-                           [--exclude-internal-sl-matches]
-                           [--exclude-internal-polya-matches]
-                           [--max-dist-from-edge MAX_DIST_FROM_EDGE]
-                           [-m MIN_SL_LENGTH] [-p MIN_POLYA_LENGTH]
-                           [-w WINDOW_SIZE] [-x MINIMUM_DIFFERENCES]
-                           [--num-threads NUM_THREADS]
-    
+                        TARGET_GENOME [-f2 NONTARGET_GENOME] -g1 TARGET_GFF
+                        [-g2 NONTARGET_GFF] -s SPLICED_LEADER
+                        [--exclude-internal-sl-matches]
+                        [--exclude-internal-polya-matches]
+                        [--minimum-trimmed-length MINIMUM_TRIMMED_LENGTH]
+                        [--max-dist-from-edge MAX_DIST_FROM_EDGE]
+                        [-m MIN_SL_LENGTH] [-p MIN_POLYA_LENGTH]
+                        [-w WINDOW_SIZE] [-x MINIMUM_DIFFERENCES]
+                        [--num-threads NUM_THREADS]
+
     Spliced Leader and poly-adenylation site analysis
-    
+
     optional arguments:
-      -h, --help            show this help message and exit
-      -i INPUT_READS, --input-reads INPUT_READS
+    -h, --help            show this help message and exit
+    -i INPUT_READS, --input-reads INPUT_READS
                             RNA-Seq FASTQ or gzipped FASTQ glob string ora txt
                             file containing filepaths to the samplesto be used
-      -d BUILD_DIRECTORY, --build-directory BUILD_DIRECTORY
+    -d BUILD_DIRECTORY, --build-directory BUILD_DIRECTORY
                             Directory to save output to
-      -f1 TARGET_GENOME, --target-genome TARGET_GENOME
+    -f1 TARGET_GENOME, --target-genome TARGET_GENOME
                             Genome sequence FASTA filepath for target species
-      -f2 NONTARGET_GENOME, --nontarget-genome NONTARGET_GENOME
+    -f2 NONTARGET_GENOME, --nontarget-genome NONTARGET_GENOME
                             Genome sequence FASTA filepath for species to be
                             filtered out prior to mapping. (optional)
-      -g1 TARGET_GFF, --target-annotations TARGET_GFF
+    -g1 TARGET_GFF, --target-annotations TARGET_GFF
                             Genome annotation GFF
-      -g2 NONTARGET_GFF, --nontarget-annotations NONTARGET_GFF
+    -g2 NONTARGET_GFF, --nontarget-annotations NONTARGET_GFF
                             Genome annotation GFF
-      -s SPLICED_LEADER, --sl-sequence SPLICED_LEADER
+    -s SPLICED_LEADER, --sl-sequence SPLICED_LEADER
                             Spliced leader DNA sequence
-      --exclude-internal-sl-matches
-                            Only allow matches with the SL at the upstream end of a
-                            read.
-      --exclude-internal-polya-matches
-                            Only allow matches with the Poly(A) tail at
-                            the downstream end of a read.
-      --max-dist-from-edge MAX_DIST_FROM_EDGE
+    --exclude-internal-sl-matches
+                            Only allow matches with the SL at the upstream end of
+                            a read.
+    --exclude-internal-polya-matches
+                            Only allow matches with the Poly(A) tail at the
+                            downstream end of a read.
+    --minimum-trimmed-length MINIMUM_TRIMMED_LENGTH
+                            The minimum read length allowed after
+                            SL/Poly(A)trimming has been performed. (default=18)
+    --max-dist-from-edge MAX_DIST_FROM_EDGE
                             For unanchored searches, what is the maximum distance
                             from the edge of the read for a feature match to be
-                            considered.
-      -m MIN_SL_LENGTH, --min-sl-length MIN_SL_LENGTH
-                            Minimum length of SL match (default=10)
-      -p MIN_POLYA_LENGTH, --min-polya-length MIN_POLYA_LENGTH
-                            Minimum length of Poly-A match (default=10)
-      -w WINDOW_SIZE, --window-size WINDOW_SIZE
-                            Number of bases up or downstream of feature to scan for
-                            related genes (default=15000)
-      -x MINIMUM_DIFFERENCES, --minimum-differences MINIMUM_DIFFERENCES
+                            considered (default=unlimited).
+    -m MIN_SL_LENGTH, --min-sl-length MIN_SL_LENGTH
+                            Minimum length of SL match (default=6)
+    -p MIN_POLYA_LENGTH, --min-polya-length MIN_POLYA_LENGTH
+                            Minimum length of Poly-A match (default=6)
+    -w WINDOW_SIZE, --window-size WINDOW_SIZE
+                            Number of bases up or downstream of feature to scan
+                            for related genes (default=50000)
+    -x MINIMUM_DIFFERENCES, --minimum-differences MINIMUM_DIFFERENCES
                             Minimum number of differences from genomic sequence
                             for a hit to be considered real. (default=2)
-      --num-threads NUM_THREADS
+    --num-threads NUM_THREADS
                             Number of threads to use (default=4).
 
+Usage Example:
+--------------
+./utr_analysis.py                                               \
+    -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
+    -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
+    -f1 TriTrypDB-27_TcruziCLBrenerEsmeraldo-like_Genome.fasta  \
+    -f2 mm10.fasta                                              \
+    -g TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff               \
+    --build-directory build/tcruzi                              \
+    --min-sl-length 12                                          \
+    --exclude-internal-polya-matches
 ### Input read filename requirements
 
 Each input sample file must include the pair-end read number (e.g. "_1" or
@@ -152,17 +167,14 @@ align to the human genome
     utr_analysis.py                                                \
        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
-       -f1 TriTrypDB-9.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \
+       -f1 TriTrypDB-27_TcruziCLBrenerEsmeraldo-like_Genome.fasta  \
        -f2 hg38.fasta                                              \
-       -g TrypDB-9.0_TcruziCLBrenerEsmeraldo-like.gff              \
+       -g TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff               \
 
 ### Example 2
 
-Below is a more complicated command with several of the parameters set to 
-non-default values. Further, the "--gff-uorf-annotations" flag has been
-set and provided with a file containing putative novel ORFs for which RNA-Seq 
-support was found. This file can be generated by running the same command 
-without the gff-uorf-annotations flag set.
+Below is a more complicated command with several of the parameters set to
+non-default values.
 
     utr_analysis.py                                                           \
        -i $RAW/lmajor/input/\*/processed/\*.fastq.gz                          \
@@ -172,10 +184,10 @@ without the gff-uorf-annotations flag set.
        -s AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG                             \
        --min-sl-length 4                                                      \
        --min-polya-length 4                                                   \
-       --minimum-differences 2                                                \   
-       --num-threads 2                                                        \  
+       --minimum-differences 3                                                \
+       --num-threads 2                                                        \
        --build-directory $SCRATCH/utr_analysis/lmajor                         \
-       --gff-uorf-annotations detected_orfs.gff                               \
+       --exclude-internal-polya-matches
 
 Note that in the above example, the wildcard ("glob") string specifying the
 location of input reads, the asterisks have been escaped using a backspace.
@@ -190,9 +202,9 @@ Background
 #### Organization in the genome
 
 - Trypanosome genomes contain tandem arrays of several hundred SL genes from
-    which the SL is transcribed.
+  which the SL is transcribed.
 - "SL repeat" = SL RNA and a non-transcribed spacer.
-- The SL exon sequence is highly conserved, while the spacer regions are 
+- The SL exon sequence is highly conserved, while the spacer regions are
   highly variable and sometimes used to differentiate closely related tryp.
   species.
 

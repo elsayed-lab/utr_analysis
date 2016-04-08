@@ -57,12 +57,14 @@ def parse_input():
     Usage Example:
     --------------
     ./utr_analysis.py                                               \\
-        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"            \\
+        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \\
         -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \\
-        -f1 TriTrypDB-7.0_TcruziCLBrenerEsmeraldo-like_Genome.fasta \\
+        -f1 TriTrypDB-27_TcruziCLBrenerEsmeraldo-like_Genome.fasta  \\
         -f2 mm10.fasta                                              \\
-        -g TrypDB-7.0_TcruziCLBrenerEsmeraldo-like.gff              \\
-        --build-directory build/tcruzi --min-sl-length 12
+        -g TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff               \\
+        --build-directory build/tcruzi                              \\
+        --min-sl-length 12                                          \\
+        --exclude-internal-polya-matches
     """)
 
     # Create ArgumentParser instance
@@ -99,21 +101,21 @@ def parse_input():
                         help=('Only allow matches with the Poly(A) tail at the '
                               'downstream end of a read.'), action='store_true')
     parser.add_argument('--minimum-trimmed-length',
-                        help=('The minimum read length allowed after SL/Poly(A)
-                               trimming has been performed. (default=18)'),
+                        help=('The minimum read length allowed after SL/Poly(A)'
+                              'trimming has been performed. (default=18)'),
                         default=18)
     parser.add_argument('--max-dist-from-edge',
                         help=('For unanchored searches, what is the maximum '
                         'distance from the edge of the read for a feature '
                         'match to be considered (default=unlimited).'),
                         default=[])
-    parser.add_argument('-m', '--min-sl-length', default=10, type=int,
-                        help='Minimum length of SL match (default=10)')
-    parser.add_argument('-p', '--min-polya-length', default=10, type=int,
-                        help='Minimum length of Poly-A match (default=10)')
-    parser.add_argument('-w', '--window-size', default=15000, type=int,
+    parser.add_argument('-m', '--min-sl-length', default=6, type=int,
+                        help='Minimum length of SL match (default=6)')
+    parser.add_argument('-p', '--min-polya-length', default=6, type=int,
+                        help='Minimum length of Poly-A match (default=6)')
+    parser.add_argument('-w', '--window-size', default=50000, type=int,
                         help=('Number of bases up or downstream of feature to '
-                              'scan for related genes (default=15000)'))
+                              'scan for related genes (default=50000)'))
     parser.add_argument('-x', '--minimum-differences', default=2, type=int,
                         help=('Minimum number of differences from genomic '
                               ' sequence for a hit to be considered real. '
@@ -690,11 +692,13 @@ def map_reads(feature_name, build_dir, sample_id, read_num):
         r1_filepath = r2_filepath.replace('2_%s_untrimmed' % feature_name, '1')
 
     # Map reads using Tophat
-    #  --no-mixed ?
+    tophat_args = '--transcriptome-max-hits 1 --no-mixed --no-discordant'
+
     ret = run_tophat(output_dir, args.target_genome,
                  loggers[sample_id][feature_name][read_num],
                  r1_filepath, r2_filepath, gff=args.target_gff,
-                 extra_args='--transcriptome-max-hits 1')
+                 max_multihits=1,
+                 extra_args=tophat_args)
 
     loggers[sample_id][feature_name][read_num].info(
         "# Finished mapping hits to genome"
@@ -957,9 +961,8 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num):
         # More filtering
         #
         # Check to see if feature is still sufficiently long;
-        # Disabling requirement for now. (2014/11/10)
-        #if len(matched_seq) < min_feature_length:
-        #    continue
+        if len(matched_seq) < min_feature_length:
+            continue
 
         # Check to see that match differs from genome sequence (quick)
         if (matched_seq == matched_genome_seq):
