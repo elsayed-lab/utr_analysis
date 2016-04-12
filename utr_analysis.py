@@ -109,7 +109,7 @@ loggers = setup_loggers(args.build_directory, build_dirs, sample_ids)
 # genomes of interest, and generates them otherwise.
 #-----------------------------------------------------------------------------
 def check_for_bowtie_indices():
-    """check for bowtie 2 indices and create if needed"""
+    """check for bowtie2 indices and create if needed"""
     # check index for target species
     genome1= os.path.splitext(args.target_genome)[0]
 

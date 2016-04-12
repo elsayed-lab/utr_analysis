@@ -441,7 +441,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle
 
             # Grab region just after mapped untrimmed read
             trimmed_genome_seq = chr_sequences[chromosome][read.pos +
-                read.rlen:read.pos + read.rlen + trimmed_part_length].seq
+                read.rlen + 1:read.pos + read.rlen + trimmed_part_length + 1].seq
             matched_genome_seq = trimmed_genome_seq[:match_length]
 
         # For reads mapped to negative strand, take complement
