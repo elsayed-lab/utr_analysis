@@ -3,7 +3,6 @@ File parsing and I/O functions:
 
     - parse_input
     - create_build_dirs
-    - num_lines
     - readfq
     - output_coordinates
     - combine_gff_results
@@ -108,7 +107,7 @@ def parse_input():
     # @TODO Validate input
     return args
 
-def create_build_dirs(args):
+def create_build_dirs(args, sample_ids):
     """Creates necessary build directories for the pipeline and returns
        a dictionary of the directory paths"""
     # Shared directory
@@ -177,8 +176,8 @@ def create_build_dirs(args):
                 os.makedirs(outdir, mode=0o755)
 
         # parameter- and feature-specific directories
-        for base_dir in [build_dirs['sl'], build_dirs['rsl'], 
-                        build_dirs['polya'], build_dirs['polyt']]:
+        for base_dir in [sl_build_dir, rsl_build_dir, 
+                         polya_build_dir, polyt_build_dir]:
             for sub_dir in ['fastq/filtered', 'fastq/unfiltered',
                             'results', 'ruffus', 'log', 'tophat']:
                 outdir = os.path.join(base_dir, sample_id, sub_dir)
@@ -193,20 +192,6 @@ def create_build_dirs(args):
         'polyt': polyt_build_dir,
         'combined': combined_output_dir
     }
-
-def num_lines(filepath):
-    """Returns the number of lines in a specified file"""
-    if filepath.endswith('.gz'):
-        fp = gzip.open(filepath, 'rb')
-    else:
-        fp = open(filepath)
-
-    # count number of lines
-    for i, line in enumerate(fp, 1):
-        pass
-
-    fp.close()
-    return i
 
 def readfq(fp):
     """

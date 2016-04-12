@@ -4,6 +4,8 @@ Helper function:
     - run_command
     - gzip_str
     - get_next_file_name
+    - setup_loggers
+    - num_lines
 
 """
 import logging
@@ -11,6 +13,7 @@ import subprocess
 import glob
 import gzip
 import re
+import sys
 import os
 
 def run_command(cmd, log_handle, wait=True):
@@ -64,7 +67,7 @@ def get_next_file_name(base_name):
         next_file_num = max([0] + file_nums) + 1
         return "%s.%d" % (base_name, next_file_num)
 
-def setup_loggers(build_dir, sample_ids):
+def setup_loggers(root_dir, build_dirs, sample_ids):
     """Sets up master and task-specific loggers"""
     # setup master logger
     log_format = '%(asctime)s %(message)s'
@@ -72,7 +75,7 @@ def setup_loggers(build_dir, sample_ids):
     formatter = logging.Formatter(log_format, datefmt=date_format)
 
     # determine log name to use
-    master_log = get_next_file_name(os.path.join(build_dir, 'build.log'))
+    master_log = get_next_file_name(os.path.join(root_dir, 'build.log'))
 
     logging.basicConfig(filename=master_log, level=logging.INFO,
                         format=log_format, datefmt=date_format)
@@ -131,5 +134,19 @@ def setup_loggers(build_dir, sample_ids):
                 handler = logging.FileHandler(sample_log_name)
                 handler.setFormatter(formatter)
                 loggers[sample_id][analysis][read_num].addHandler(handler)
+
+def num_lines(filepath):
+    """Returns the number of lines in a specified file"""
+    if filepath.endswith('.gz'):
+        fp = gzip.open(filepath, 'rb')
+    else:
+        fp = open(filepath)
+
+    # count number of lines
+    for i, line in enumerate(fp, 1):
+        pass
+
+    fp.close()
+    return i
 
     return loggers

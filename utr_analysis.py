@@ -25,7 +25,7 @@ from ruffus import *
 from Bio import Seq,BiopythonDeprecationWarning
 from utr.io import parse_input, create_build_dirs
 from utr.mapping import map_reads, filter_mapped_reads
-from utr.util import get_next_file, setup_loggers
+from utr.util import setup_loggers
 from utr.sequence import find_sequence, compute_coordinates
 
 # Hide Biopython deprecation warnings
@@ -35,9 +35,8 @@ warnings.simplefilter('ignore', BiopythonDeprecationWarning)
 # Global variables
 #--------------------------------------
 
-# parse input
+# Parse command-line arguments
 args = parse_input()
-build_dirs = create_build_dirs(args, sample_ids)
 
 # Get a list of sample ids, e.g. /path/to/input/samples/sample01/...
 
@@ -56,8 +55,11 @@ for filename in glob.glob(args.input_reads):
     if sample_id not in sample_ids:
         sample_ids.append(sample_id)
 
-# setup global and task-specific loggers
-loggers = setup_loggers(args.build_directory, sample_ids)
+# Create build directories
+build_dirs = create_build_dirs(args, sample_ids)
+
+# Setup global and task-specific loggers
+loggers = setup_loggers(args.build_directory, build_dirs, sample_ids)
 
 #-----------------------------------------------------------------------------
 # RUFFUS TASKS
