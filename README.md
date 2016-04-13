@@ -125,15 +125,17 @@ Usage
 
 Usage Example:
 --------------
-./utr_analysis.py                                               \
-    -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
-    -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
-    -f1 TriTrypDB-27_TcruziCLBrenerEsmeraldo-like_Genome.fasta  \
-    -f2 mm10.fasta                                              \
-    -g TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff               \
-    --build-directory build/tcruzi                              \
-    --min-sl-length 12                                          \
-    --exclude-internal-polya-matches
+
+    ./utr_analysis.py                                               \
+        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
+        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
+        -f1 TriTrypDB-27_TcruziCLBrenerEsmeraldo-like_Genome.fasta  \
+        -f2 mm10.fasta                                              \
+        -g TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff               \
+        --build-directory build/tcruzi                              \
+        --min-sl-length 12                                          \
+        --exclude-internal-polya-matches
+
 ### Input read filename requirements
 
 Each input sample file must include the pair-end read number (e.g. "_1" or
@@ -226,6 +228,15 @@ SL = SL exon = SL mini-exon
 ##### L. major (Rastrojo et al. 2013)
 
 > AACTAACGCTATATAAGTATCAGTTTCTGTACTTTATTG
+
+Pipeline Overview
+-----------------
+
+Below is an overview of the steps executed in the UTR analysis pipeline. The
+flow chart was generated using the `pipeline_printout_graph` function from
+Ruffus.
+
+![UTR Analysis Pipeline Flowchart](extra/utr_analysis_flowchart.png)
 
 References
 ----------
