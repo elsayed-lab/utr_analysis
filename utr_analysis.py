@@ -38,20 +38,16 @@ warnings.simplefilter('ignore', BiopythonDeprecationWarning)
 # Parse command-line arguments
 args = parse_input()
 
-# Get a list of sample ids, e.g. /path/to/input/samples/sample01/...
+# Get a list of sample ids
 
 # For simplicity, the sample ID for a given file is assumed to be everything
 # in the filename up to the mate pair specification.
-input_regex = re.compile(r'^(.*/)?(.*)_(R?[1-2])')
-
-SAMPLE_REGEX_DIR_IDX = 0
-SAMPLE_REGEX_ID_IDX = 1
-SAMPLE_REGEX_READ_NUM_IDX = 2
+input_regex = re.compile(r'^(.*/)?(?P<SAMPLE_ID>.*)_(R?[1-2])')
 
 sample_ids = []
 
 for filename in glob.glob(args.input_reads):
-    sample_id = re.match(input_regex, filename).groups()[SAMPLE_REGEX_ID_IDX]
+    sample_id = re.match(input_regex, filename).group('SAMPLE_ID')
     if sample_id not in sample_ids:
         sample_ids.append(sample_id)
 
@@ -111,7 +107,8 @@ loggers = setup_loggers(args.build_directory, build_dirs, sample_ids)
 def check_for_bowtie_indices():
     """check for bowtie2 indices and create if needed"""
     # check index for target species
-    genome1= os.path.splitext(args.target_genome)[0]
+    BASENAME_IDX = 0
+    genome1 = os.path.splitext(args.target_genome)[BASENAME_IDX]
 
     # if index exists, stop here
     if os.path.exists('%s.1.bt2' % genome1):
@@ -128,7 +125,7 @@ def check_for_bowtie_indices():
         return
 
     # check index for nontarget species
-    genome2 = os.path.splitext(args.nontarget_genome)[0]
+    genome2 = os.path.splitext(args.nontarget_genome)[BASENAME_IDX]
 
     # if index exists, stop here
     if os.path.exists('%s.1.bt2' % genome2):
@@ -151,7 +148,8 @@ def check_genome_fastas():
     """Checks to make sure the genome fasta exists and is available as a .fa
     file; required by Tophat."""
     # First, check target genome
-    target_genome = os.path.splitext(args.target_genome)[0]
+    BASENAME_IDX = 0
+    target_genome = os.path.splitext(args.target_genome)[BASENAME_IDX]
 
     # if index exists, continue to next genome
     if os.path.exists('%s.fa' % target_genome):
@@ -168,7 +166,7 @@ def check_genome_fastas():
         return
 
     # Next, check filter genome
-    nontarget_genome = os.path.splitext(args.nontarget_genome)[0]
+    nontarget_genome = os.path.splitext(args.nontarget_genome)[BASENAME_IDX]
 
     # if index exists, continue to next genome
     if os.path.exists('%s.fa' % nontarget_genome):
@@ -189,54 +187,48 @@ def check_genome_fastas():
 #-----------------------------------------------------------------------------
 @follows(check_for_bowtie_indices)
 @follows(check_genome_fastas)
-@transform(args.input_reads,
-           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-           r'%s/\2/ruffus/\2_\3.filter_nontarget_reads' % build_dirs['shared'],
-           r'\2', r'\3')
-def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
-    # If we are only mapping to a single genome, skip this step
+@collate(args.input_reads,
+         formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_(R?[1-2])(.*)?\.fastq(\.gz)?'),
+         ['%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_nontarget_reads_removed.1.fastq.gz' % build_dirs['shared'],
+          '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_nontarget_reads_removed.2.fastq.gz' % build_dirs['shared']],
+          '{SAMPLE_ID[0]}')
+def filter_nontarget_reads(input_reads, output_reads, sample_id):
+    # If we are only mapping to a single genome, we can just create
+    # symlinks to the original input files and skip this step
     if not args.nontarget_genome:
-        open(output_file, 'w').close()
-        return
+        # Determine which input corresponds to R1
+        #if '1.fastq' in input_reads[0]:
+        #    r1 = input_reads[0]
+        #else:
+        #    r1 = input_reads[1]
 
-    # We only need to map once for each mated pair
-    if read_num in ["2", "R2"]:
-        r1_suffix = '1' if read_num == '2' else 'R1'
+        #r2 = r1.replace('1.fastq', '2.fastq')
 
-        # Wait for R1 task to finish processing and then mark as finished
-        while not os.path.exists(output_file.replace(read_num, r1_suffix)):
-            time.sleep(120)
-
-        # Mark as finished and exit
-        open(output_file, 'w').close()
+        ## Create symlinks
+        #os.symlink(r1, output_file)
+        #os.symlink(r2, output_file.replace('1.fastq', '2.fastq'))
+        for read_num in [0,1]:
+            os.symlink(input_reads[read_num], output_reads[read_num])
         return
 
     logging.info("# Removing nontarget reads.")
 
     # output directories
     tophat_dir = os.path.join(build_dirs['shared'], sample_id,
-                          'tophat', 'mapped_to_nontarget')
-    fastq_dir = os.path.join(build_dirs['shared'], sample_id,
-                          'fastq', 'nontarget_reads_removed')
-
-    # read locations
-    r1 = input_file
-    r2 = r1.replace("R1", "R2")
+                             'tophat', 'mapped_to_nontarget')
+    fastq_dir = os.path.join(build_dirs['shared'], sample_id, 'fastq')
 
     # output fastq filepaths
     output_fastq = os.path.join(
         fastq_dir, "%s_nontarget_reads_removed.fastq.gz" % (sample_id))
 
     # check for gff
-    gff=args.nontarget_gff if args.nontarget_gff else None
+    gff = args.nontarget_gff if args.nontarget_gff else None
 
     # map reads and remove hits
-    filter_mapped_reads(r1, r2, args.nontarget_genome, tophat_dir,
-                        output_fastq, logging, gff=gff)
+    filter_mapped_reads(input_reads[0], input_reads[1], args.nontarget_genome,
+                        tophat_dir, output_fastq, logging, gff=gff)
     logging.info("# Finished removing nontarget reads.")
-
-    # Let ruffus know we are finished
-    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Step 2: Filter genomic reads
@@ -245,62 +237,24 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
 # trimming. These reads likely represent actual features in the genome and not
 # the capped or polyadenylated reads we are interested in.
 #-----------------------------------------------------------------------------
-#@transform(args.input_reads,
-#           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-#           r'%s/\2/ruffus/\2_\3.filter_genomic_reads' % build_dirs['shared'],
-#           r'\2', r'\3')
-@follows(filter_nontarget_reads)
-@subdivide(args.input_reads,
-           regex(r'^(.*/)?([^_]*)_(R?[1-2])_?(.*)?\.fastq(\.gz)?'),
-           [r'%s/\2/ruffus/\2_\3.filter_genomic_reads.sl' %
-               build_dirs['shared'],
-            r'%s/\2/ruffus/\2_\3.filter_genomic_reads.rsl' %
-            build_dirs['shared'],
-            r'%s/\2/ruffus/\2_\3.filter_genomic_reads.polya' %
-            build_dirs['shared'],
-            r'%s/\2/ruffus/\2_\3.filter_genomic_reads.polyt' %
-            build_dirs['shared']],
-            r'%s/\2/ruffus/\2_\3.filter_genomic_reads' % build_dirs['shared'],
-            r'\2', r'\3')
-def filter_genomic_reads(input_file, output_files, output_base, sample_id, read_num):
+@subdivide(filter_nontarget_reads,
+           formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_nontarget_reads_removed_(?P<READ_NUM>R?[1-2])\.fastq\.gz'),
+           r'%s/{SAMPLE_ID}/fastq/{SAMPLE_ID}_genomic_reads_removed.*.fastq.gz',
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
+def filter_genomic_reads(input_files, output_files, sample_id, read_num):
     # Clean-up any files from previous runs
     for x in output_files:
+        logging.info("# Cleaning up pre-existing file: %s" % x)
         if os.path.exists(x):
             os.unlink(x)
 
-    # We only need to map once for each mated pair
-    if read_num in ["2", "R2"]:
-        r1_suffix = '1' if read_num == '2' else 'R1'
-
-        # Wait for R1 task to finish processing and then mark as finished
-        while not os.path.exists(output_files[0].replace(read_num, r1_suffix)):
-            time.sleep(120)
-
-        # Mark as finished and exit
-        for output_file in output_files:
-            open(output_file, 'w').close()
-        return
-
     logging.info("# Removing genomic reads.")
-
-    # determine source of input reads to use
-    if args.nontarget_genome:
-        # if nontarget genome was specified, use output from that step
-        input_fastq_dir = os.path.join(build_dirs['shared'], sample_id,
-                                    'fastq', 'nontarget_reads_removed')
-        r1 = os.path.join(input_fastq_dir,
-                        "%s_nontarget_reads_removed.1.fastq.gz" % (sample_id))
-        r2 = r1.replace(".1", ".2")
-    else:
-        # otherwise use inputs specified at run-time
-        r1 = input_file
-        r2 = r1.replace("R1", "R2")
 
     # output tophat and fastq directories
     tophat_dir = os.path.join(build_dirs['shared'], sample_id,
                               'tophat', 'mapped_to_target_untrimmed')
-    output_fastq_dir = os.path.join(build_dirs['shared'], sample_id,
-                                   'fastq', 'genomic_reads_removed')
+    output_fastq_dir = os.path.join(build_dirs['shared'], sample_id, 'fastq')
 
     # output fastq filepaths
     output_fastq = os.path.join(
@@ -310,7 +264,8 @@ def filter_genomic_reads(input_file, output_files, output_base, sample_id, read_
     # Initially we will keep all (unmapped) reads which differ from genome by
     # at least one base. Later on we can be more restictive in our filtering
     # to make sure we aren't getting spurious hits.
-    filter_mapped_reads(r1, r2, args.target_genome, tophat_dir, output_fastq,
+    filter_mapped_reads(input_files[0], input_files[1],
+                        args.target_genome, tophat_dir, output_fastq,
                         logging, read_mismatches=1, gff=args.target_gff)
     logging.info("# Finished removing genomic reads.")
 
@@ -333,10 +288,11 @@ def filter_genomic_reads(input_file, output_files, output_base, sample_id, read_
 #      boundaries of the match, and thus, where to trim reads.
 #-----------------------------------------------------------------------------
 @transform(filter_genomic_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).filter_genomic_reads.sl'),
-           r'%s/\2/ruffus/\2_\3.find_sl_reads' % build_dirs['sl'],
-           r'\2', r'\3')
-def find_sl_reads(input_file, output_file, sample_id, read_num):
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_genomic_reads_removed.{?P<READ_NUM>R?[12]}.fastq.gz'),
+           '%s/{SAMPLE_ID}/fastq/unfiltered/{SAMPLE_ID}_{READ_NUM}_1_sl_trimmed.fastq.gz' % build_dirs['sl'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
+def find_sl_reads(input_reads, output_file, sample_id, read_num):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
     return those containing a subsequence of the spliced leader.
@@ -361,18 +317,10 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
         subseqs.reverse()
         sl_regex = '|'.join(subseqs)
 
-    # input reads
-    input_reads = os.path.join(
-        build_dirs['shared'], sample_id, 'fastq', 'genomic_reads_removed',
-        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
-
     log_handle = loggers[sample_id]['sl'][read_num]
 
     find_sequence(input_reads, 'sl', sl_filter, sl_regex, build_dirs['sl'],
                   sample_id, read_num, log_handle)
-
-    # Let Ruffus know we are done
-    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Step 4: Map trimmed reads
@@ -382,14 +330,14 @@ def find_sl_reads(input_file, output_file, sample_id, read_num):
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
 @transform(find_sl_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).find_sl_reads'),
-           r'\1/\2_\3.map_sl_reads',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_{?P<READ_NUM>R?[12]}_1_sl_trimmed.fastq.gz'),
+           '%s/{SAMPLE_ID}/tophat/{READ_NUM}_filtered_trimmed/accepted_hits.bam' % build_dirs['sl'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def map_sl_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
     log_handle = loggers[sample_id]['sl'][read_num]
     map_reads('sl', build_dirs['sl'], sample_id, read_num, log_handle)
-    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Step 5: Compute UTR coordinates
@@ -401,15 +349,16 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
 # locations (e.g. not inside a CDS.)
 #-----------------------------------------------------------------------------
 @transform(map_sl_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).map_sl_reads'),
-           r'\1/\2_\3.compute_sl_coordinates',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}/tophat/{?P<READ_NUM>R?[12]}_filtered_trimmed/accepted_hits.bam'),
+           '%s/{SAMPLE_ID}/results/sl_coordinates_{READ_NUM}.gff' % build_dirs['sl'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped trans-splicing events "
                  "(%s)" % sample_id)
-    compute_coordinates('sl', build_dirs['sl'], sample_id, read_num)
+    log_handle = loggers[sample_id]['sl'][read_num]
+    compute_coordinates('sl', build_dirs['sl'], sample_id, read_num, log_handle)
     logging.info("# Finished!")    
-    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Reverse SL analysis
@@ -419,10 +368,11 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 # Reverse SL Step 1
 #
 @transform(filter_genomic_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).filter_genomic_reads.rsl'),
-           r'%s/\2/ruffus/\2_\3.find_rsl_reads' % build_dirs['rsl'],
-           r'\2', r'\3')
-def find_rsl_reads(input_file, output_file, sample_id, read_num):
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_genomic_reads_removed.{?P<READ_NUM>R?[12]}.fastq.gz'),
+           '%s/{SAMPLE_ID}/fastq/unfiltered/{SAMPLE_ID}_{READ_NUM}_1_rsl_trimmed.fastq.gz' % build_dirs['rsl'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
+def find_rsl_reads(input_reads, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
     # Create a reversed version of the SL sequence
     reverse_sl = str(Seq.Seq(args.spliced_leader).reverse_complement())
@@ -445,44 +395,39 @@ def find_rsl_reads(input_file, output_file, sample_id, read_num):
         subseqs.reverse()
         rsl_regex = '|'.join(subseqs)
 
-    # input reads
-    input_reads = os.path.join(
-        build_dirs['shared'], sample_id, 'fastq', 'genomic_reads_removed',
-        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
-
     logging.info("# find_rsl_reads (%s %s)" % (sample_id, read_num))
 
     find_sequence(input_reads, 'rsl', rsl_filter, rsl_regex,
                   build_dirs['rsl'], sample_id, read_num, trimmed_side='right',
                   reverse=True)
-    open(output_file, 'w').close()
 
 #
 # RSL Step 2
 #
 @transform(find_rsl_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).find_rsl_reads'),
-           r'\1/\2_\3.map_rsl_reads',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_{?P<READ_NUM>R?[12]}_1_rsl_trimmed.fastq.gz'),
+           '%s/{SAMPLE_ID}/tophat/{READ_NUM}_filtered_trimmed/accepted_hits.bam' % build_dirs['rsl'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def map_rsl_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
     log_handle = loggers[sample_id]['rsl'][read_num]
     map_reads('rsl', build_dirs['rsl'], sample_id, read_num, log_handle)
-    open(output_file, 'w').close()
 
 #
 # RSL Step 3
 #
 @transform(map_rsl_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).map_rsl_reads'),
-           r'\1/\2_\3.compute_rsl_coordinates',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}/tophat/{?P<READ_NUM>R?[12]}_filtered_trimmed/accepted_hits.bam'),
+           '%s/{SAMPLE_ID}/results/rsl_coordinates_{READ_NUM}.gff' % build_dirs['rsl'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info(
-        "# Computing coordinates for mapped reverse sl events [A]")
-    compute_coordinates('rsl', build_dirs['rsl'], sample_id, read_num)
+    logging.info("# Computing coordinates for mapped trans-splicing events "
+                 "(%s, reverse)" % sample_id)
+    log_handle = loggers[sample_id]['rsl'][read_num]
+    compute_coordinates('rsl', build_dirs['rsl'], sample_id, read_num, log_handle)
     logging.info("# Finished!")    
-    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Poly(A) Analysis
@@ -492,55 +437,50 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
 # Poly(A) Step 1
 #
 @transform(filter_genomic_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).filter_genomic_reads.polya'),
-           r'%s/\2/ruffus/\2_\3.find_polya_reads' % build_dirs['polya'],
-           r'\2', r'\3')
-def find_polya_reads(input_file, output_file, sample_id, read_num):
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_genomic_reads_removed.{?P<READ_NUM>R?[12]}.fastq.gz'),
+           '%s/{SAMPLE_ID}/fastq/unfiltered/{SAMPLE_ID}_{READ_NUM}_1_polya_trimmed.fastq.gz' % build_dirs['polya'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
+def find_polya_reads(input_reads, output_file, sample_id, read_num):
     """Matches reads with possible Poly(A) tail fragment"""
     polya_filter = 'A' * args.min_polya_length
 
+    polya_regex = 'A{%d,}' % (args.min_polya_length)
     if args.exclude_internal_polya_matches:
-        polya_regex = 'A{%d,}$' % (args.min_polya_length)
-    else:
-        polya_regex = 'A{%d,}' % (args.min_polya_length)
-
-    # input reads
-    input_reads = os.path.join(
-        build_dirs['shared'], sample_id, 'fastq', 'genomic_reads_removed',
-        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
+        polya_regex = polya_regex + "$"
 
     logging.info("# find_polya_reads (%s %s)" % (sample_id, read_num))
 
     find_sequence(input_reads, 'polya', polya_filter, polya_regex,
                   build_dirs['polya'], sample_id, read_num, trimmed_side='right')
-    open(output_file, 'w').close()
 
 #
 # Poly(A) Step 2
 #
 @transform(find_polya_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).find_polya_reads'),
-           r'\1/\2_\3.map_polya_reads',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_{?P<READ_NUM>R?[12]}_1_polya_trimmed.fastq.gz'),
+           '%s/{SAMPLE_ID}/tophat/{READ_NUM}_filtered_trimmed/accepted_hits.bam' % build_dirs['polya'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def map_polya_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
     log_handle = loggers[sample_id]['polya'][read_num]
     map_reads('polya', build_dirs['polya'], sample_id, read_num, log_handle)
-    open(output_file, 'w').close()
 
 #
 # Poly(A) Step 3
 #
 @transform(map_polya_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).map_polya_reads'),
-           r'\1/\2_\3.compute_polya_coordinates',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}/tophat/{?P<READ_NUM>R?[12]}_filtered_trimmed/accepted_hits.bam'),
+           '%s/{SAMPLE_ID}/results/polya_coordinates_{READ_NUM}.gff' % build_dirs['polya'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info(
-        "# Computing coordinates for mapped polyadenylation events [A]")
-    compute_coordinates('polya', build_dirs['polya'], sample_id, read_num)
+    logging.info("# Computing coordinates for mapped polyadenylation sites "
+                 "(%s)" % sample_id)
+    log_handle = loggers[sample_id]['polya'][read_num]
+    compute_coordinates('polya', build_dirs['polya'], sample_id, read_num, log_handle)
     logging.info("# Finished!")    
-    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Poly(T) Analysis
@@ -550,57 +490,53 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 # Poly(T) Step 1
 #
 @transform(filter_genomic_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).filter_genomic_reads.polyt'),
-           r'%s/\2/ruffus/\2_\3.find_polyt_reads' % build_dirs['polyt'],
-           r'\2', r'\3')
-def find_polyt_reads(input_file, output_file, sample_id, read_num):
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_genomic_reads_removed.{?P<READ_NUM>R?[12]}.fastq.gz'),
+           '%s/{SAMPLE_ID}/fastq/unfiltered/{SAMPLE_ID}_{READ_NUM}_1_polyt_trimmed.fastq.gz' % build_dirs['polyt'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
+def find_polyt_reads(input_reads, output_file, sample_id, read_num):
     """Matches reads with possible Poly(T) tail fragment"""
     # Match reads with at least n T's at the beginning of the read; For now
     # we will always require matches to be at the beginning of the read.
     polyt_filter = 'T' * args.min_polya_length
-    if args.exclude_internal_polya_matches:
-        polyt_regex = '^T{%d,}' % (args.min_polya_length)
-    else:
-        polyt_regex = 'T{%d,}' % (args.min_polya_length)
 
-    # input reads
-    input_reads = os.path.join(
-        build_dirs['shared'], sample_id, 'fastq', 'genomic_reads_removed',
-        "%s_genomic_reads_removed.%s.fastq.gz" % (sample_id, read_num[-1]))
+    polyt_regex = 'T{%d,}' % (args.min_polya_length)
+    if args.exclude_internal_polya_matches:
+        polyt_regex = '^' + polyt_regex
 
     logging.info("# find_polyt_reads (%s %s)" % (sample_id, read_num))
 
     find_sequence(input_reads, 'polyt', polyt_filter, polyt_regex,
                   build_dirs['polyt'], sample_id, read_num, reverse=True)
-    open(output_file, 'w').close()
 
 #
 # Poly(T) Step 2
 #
 @transform(find_polyt_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).find_polyt_reads'),
-           r'\1/\2_\3.map_polyt_reads',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}_{?P<READ_NUM>R?[12]}_1_polyt_trimmed.fastq.gz'),
+           '%s/{SAMPLE_ID}/tophat/{READ_NUM}_filtered_trimmed/accepted_hits.bam' % build_dirs['polyt'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def map_polyt_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered Poly(T) reads back to the genome"""
     log_handle = loggers[sample_id]['polyt'][read_num]
     map_reads('polyt', build_dirs['polyt'], sample_id, read_num, log_handle)
-    open(output_file, 'w').close()
 
 #
 # Poly(T) Step 3
 #
 @transform(map_polyt_reads,
-           regex(r'^(.*)/(.*)_(R?[12]).map_polyt_reads'),
-           r'\1/\2_\3.compute_polyt_coordinates',
-           r'\2', r'\3')
+           formatter(r'^(.*)/{?P<SAMPLE_ID>.+}/tophat/{?P<READ_NUM>R?[12]}_filtered_trimmed/accepted_hits.bam'),
+           '%s/{SAMPLE_ID}/results/polyt_coordinates_{READ_NUM}.gff' % build_dirs['polyt'],
+           '{SAMPLE_ID}',
+           '{READ_NUM}')
 def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info("# Computing coordinates for mapped polyadenylation events [T]")
+    logging.info("# Computing coordinates for mapped polyadenylation sites "
+                 "(%s, reverse)" % sample_id)
     log_handle = loggers[sample_id]['polyt'][read_num]
     compute_coordinates('polyt', build_dirs['polyt'], sample_id, read_num,
                         log_handle)
     logging.info("# Finished!")    
-    open(output_file, 'w').close()
 
 #-----------------------------------------------------------------------------
 # Step 6: Combine coordinate output for multiple samples
@@ -610,50 +546,32 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
 #
 # Coordinates with low coverage may also be filtered out at this step.
 #-----------------------------------------------------------------------------
-@merge(compute_polyt_coordinates, '%s/finished' % build_dirs['combined'])
-def combine_results(input_files, output_file):
-    # Convert input ruffus tasks to corresponding GFF filepaths
-    regex = '.*/(.*)_(R?[1-2]).*'
-
+@merge([compute_sl_coordinates,
+        compute_rsl_coordinates],
+        formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_(?P<READ_NUM>R?[1-2]).gff'),
+        os.path.join(build_dirs['combined'], 'spliced_leader.gff'))
+def combine_sl_results(input_files, output_file):
     # Combine spliced leader output
     logging.info("# Combining spliced leader coordinates output")
-    sl_gffs = []
-    for infile in input_files:
-        (sample_id, read_num) = re.match(regex, infile).groups()
-        # SL
-        gff1 = "%s/%s/results/sl_coordinates_%s.gff" % (
-                 build_dirs['sl'], sample_id, read_num)
-        sl_gffs.append(gff1)
 
-        # Reverse SL
-        gff2 = "%s/%s/results/rsl_coordinates_%s.gff" % (
-                 build_dirs['rsl'], sample_id, read_num)
-        sl_gffs.append(gff2)
-
-    sl_outfile = os.path.join(build_dirs['combined'], 'spliced_leader.gff')
-    sl_combined = combine_gff_results(sl_gffs)
-
-    # Combine Poly(A) output
-    logging.info("# Combining Poly(A) coordinates output")
-
-    polya_gffs = []
-    for infile in input_files:
-        (sample_id, read_num) = re.match(regex, infile).groups()
-        # Poly(A)
-        gff1 = "%s/%s/results/polya_coordinates_%s.gff" % (
-                 build_dirs['polya'], sample_id, read_num)
-        polya_gffs.append(gff1)
-
-        # Poly(T)
-        gff2 = "%s/%s/results/polyt_coordinates_%s.gff" % (
-                 build_dirs['polyt'], sample_id, read_num)
-        polya_gffs.append(gff2)
-
-    polya_outfile = os.path.join(build_dirs['combined'], 'polya.gff')
-    polya_combined = combine_gff_results(polya_gffs)
+    sl_combined = combine_gff_results(input_files)
 
     # Save summary GFFs
+    sl_outfile = os.path.join(build_dirs['combined'], 'spliced_leader.gff')
     output_coordinates(sl_combined, 'sl', sl_outfile, track_color='83,166,156')
+
+@merge([compute_polya_coordinates,
+        compute_polyt_coordinates],
+        formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_(?P<READ_NUM>R?[1-2]).gff'),
+        os.path.join(build_dirs['combined'], 'polya.gff'))
+def combine_polya_results(input_files, output_file):
+    # Combine spliced leader output
+    logging.info("# Combining spliced leader coordinates output")
+
+    polya_combined = combine_gff_results(input_files)
+
+    # Save summary GFFs
+    polya_outfile = os.path.join(build_dirs['combined'], 'polya.gff')
     output_coordinates(polya_combined, 'polya', polya_outfile,
                        track_color='166,83,93')
 
@@ -661,10 +579,10 @@ def combine_results(input_files, output_file):
 # Run pipeline
 #-----------------------------------------------------------------------------
 if __name__ == "__main__":
-    #pipeline_run([compute_rsl_coordinates], forcedtorun_tasks=[combine_results],
-    #             touch_files_only=True, logger=logging.getLogger(''))
-    pipeline_run([combine_results], forcedtorun_tasks=[combine_results],
-                 logger=logging.getLogger(''), multiprocess=args.num_threads)
+    pipeline_run([combine_sl_results, combine_polya_results],
+                 logger=logging.getLogger(''),
+                 multiprocess=args.num_threads)
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
-                            [combine_results])
+                            [combine_sl_results, combine_polya_results],
+                            pipeline_name='Trypanosome UTR Analysis Pipeline')
 
