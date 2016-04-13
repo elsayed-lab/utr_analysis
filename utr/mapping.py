@@ -234,10 +234,12 @@ def map_reads(feature_name, build_dir, sample_id, read_num, log_handle):
     basedir = '%s/%s/fastq' % (build_dir, sample_id)
 
     # R1 input filepath (including matched sequence)
-    if (read_num == 'R1'):
+    if read_num in ['1', 'R1']:
+        r2_suffix = '2' if read_num == '1' else 'R2'
+
         r1_filepath = (
-            '%s/unfiltered/%s_R1_1_%s_trimmed.fastq.gz' %
-            (basedir, sample_id, feature_name)
+            '%s/unfiltered/%s_%s_1_%s_trimmed.fastq.gz' %
+            (basedir, sample_id, read_num, feature_name)
         )
 
         # R2 filepath (for PE reads)
@@ -248,9 +250,10 @@ def map_reads(feature_name, build_dir, sample_id, read_num, log_handle):
             r2_filepath = ""
     # R2 input filepath
     else:
+        r1_suffix = '1' if read_num == '2' else 'R1'
         r2_filepath = (
-            '%s/unfiltered/%s_R2_2_%s_trimmed.fastq.gz' %
-            (basedir, sample_id, feature_name)
+            '%s/unfiltered/%s_%s_2_%s_trimmed.fastq.gz' %
+            (basedir, sample_id, read_num, feature_name)
         )
         r1_filepath = r2_filepath.replace('2_%s_untrimmed' % feature_name, '1')
 
