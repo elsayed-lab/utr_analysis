@@ -200,9 +200,11 @@ def filter_nontarget_reads(input_file, output_file, sample_id, read_num):
         return
 
     # We only need to map once for each mated pair
-    if read_num == "R2":
+    if read_num in ["2", "R2"]:
+        r1_suffix = '1' if read_num == '2' else 'R1'
+
         # Wait for R1 task to finish processing and then mark as finished
-        while not os.path.exists(output_file.replace("R2", "R1")):
+        while not os.path.exists(output_file.replace(read_num, r1_suffix)):
             time.sleep(120)
 
         # Mark as finished and exit
@@ -267,9 +269,11 @@ def filter_genomic_reads(input_file, output_files, output_base, sample_id, read_
             os.unlink(x)
 
     # We only need to map once for each mated pair
-    if read_num == "R2":
+    if read_num in ["2", "R2"]:
+        r1_suffix = '1' if read_num == '2' else 'R1'
+
         # Wait for R1 task to finish processing and then mark as finished
-        while not os.path.exists(output_files[0].replace("R2", "R1")):
+        while not os.path.exists(output_files[0].replace(read_num, r1_suffix)):
             time.sleep(120)
 
         # Mark as finished and exit
