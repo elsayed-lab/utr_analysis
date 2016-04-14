@@ -122,7 +122,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     mated_reads_buffer = StringIO.StringIO()
 
     # Keep track of matched read IDs
-    read_ids = []
+    # read_ids = []
 
     # Find all reads containing the sequence of interest
     fastq = gzip.open(input_file, 'rb')
@@ -354,12 +354,21 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle
         # drop the @ in front of HWI
         match_lengths[row[0][1:]] = int(row[1])
 
+    # Keep track of matched read IDs
+    read_ids = []
+
     # Get coordinate and strand for each read in bam file
     for read in sam:
         # Get read where feature sequence was found
         if ((read.is_read1 and read_num == 'R2') or
             (read.is_read2 and read_num == 'R1')):
             continue
+
+        # TESTING 2015/04/13
+        if read.qname in read_ids:
+            import pdb; pdb.set_trace()
+
+        read_ids.append(read.qname)
 
         # Chromosome and strand where the read was mapped
         chromosome = sam.getrname(read.tid)
