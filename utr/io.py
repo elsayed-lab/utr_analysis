@@ -90,6 +90,9 @@ def parse_input():
                               '(default=2)'))
     parser.add_argument('--num-threads', default=4, type=int,
                         help='Number of threads to use (default=4).')
+    parser.add_argument('--num-threads-tophat', default=1, type=int,
+                        help=('Number of threads to use for each Tophat run. '
+                              '(default=1)'
 
     # Parse arguments
     args = parser.parse_args()
@@ -136,12 +139,12 @@ def create_build_dirs(args, sample_ids):
 
     # SL sub-directory
     sl_build_dir = os.path.join(args.build_directory,
-                                'spliced_leader', 
+                                'spliced_leader',
                                 sl_dir_suffix)
 
     # Reverse SL sub-directory
     rsl_build_dir = os.path.join(args.build_directory,
-                                    'reverse_spliced_leader', 
+                                    'reverse_spliced_leader',
                                     sl_dir_suffix)
 
     # Poly(A) tail sub-directory
@@ -176,7 +179,7 @@ def create_build_dirs(args, sample_ids):
                 os.makedirs(outdir, mode=0o755)
 
         # parameter- and feature-specific directories
-        for base_dir in [sl_build_dir, rsl_build_dir, 
+        for base_dir in [sl_build_dir, rsl_build_dir,
                          polya_build_dir, polyt_build_dir]:
             for sub_dir in ['fastq/filtered', 'fastq/unfiltered',
                             'results', 'ruffus', 'log', 'tophat']:
@@ -269,7 +272,7 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
     writer = csv.writer(fp, delimiter='\t')
 
     # Determine GFF feature type to use
-    if feature_name in ['sl', 'rsl']: 
+    if feature_name in ['sl', 'rsl']:
         feature_type = 'trans_splice_site'
     else:
         feature_type = 'polyA_site'

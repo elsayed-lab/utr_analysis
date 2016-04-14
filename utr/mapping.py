@@ -147,7 +147,7 @@ def run_bam2fastx(bam, fastq, log_handle):
     return run_command(cmd, log_handle)
 
 def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
-                        gff=None, read_mismatches=2):
+                        gff=None, read_mismatches=2, num_threads_tophat=1):
     """
     Maps reads using tophat and discards any that align to the genome.
 
@@ -169,6 +169,8 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         Filepath to GFF to use during mapping (optional)
     read_mismatches: int
         Number of mismatches to allow when scanning with Tophat.
+    num_threads_tophat: int
+        Number of threads to use when running Tophat (default: 1)
     """
     # bam / fastq filepaths
     bam_input = os.path.join(tophat_dir, 'unmapped_sorted.bam')
@@ -182,6 +184,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
 
         ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
                          read_mismatches=read_mismatches, gff=gff,
+                         num_threadhs=num_threads_tophat, 
                          extra_args=tophat_args)
 
         # number of reads before filtering
@@ -206,7 +209,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         print("# Error running bam2fastx (%s)!" % genome)
         sys.exit()
 
-def map_reads(feature_name, build_dir, sample_id, read_num, log_handle):
+def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, log_handle):
     """
     Maps the filtered reads back to the genome. If the trimmed version of
     the read successfully maps this is indicative of a possible trans-spliced
@@ -222,6 +225,8 @@ def map_reads(feature_name, build_dir, sample_id, read_num, log_handle):
         Name of sample currently processing.
     read_num: str
         Read number currently being processed.
+    num_threads_tophat: int
+        Number of threads to use when running Tophat.
     log_handle: logging.Handle
         Handler to use for logging.
     """
@@ -262,6 +267,7 @@ def map_reads(feature_name, build_dir, sample_id, read_num, log_handle):
 
     ret = run_tophat(output_dir, args.target_genome, log_handle, r1_filepath,
                      r2_filepath, gff=args.target_gff, max_multihits=1,
+                     num_threads=num_threads_tophat,
                      extra_args=tophat_args)
 
     log_handle.info("# Finished mapping hits to genome")
