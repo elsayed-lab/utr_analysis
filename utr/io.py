@@ -92,7 +92,7 @@ def parse_input():
                         help='Number of threads to use (default=4).')
     parser.add_argument('--num-threads-tophat', default=1, type=int,
                         help=('Number of threads to use for each Tophat run. '
-                              '(default=1)'
+                              '(default=1)'))
 
     # Parse arguments
     args = parser.parse_args()

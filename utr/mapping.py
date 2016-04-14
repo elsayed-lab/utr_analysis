@@ -184,7 +184,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
 
         ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
                          read_mismatches=read_mismatches, gff=gff,
-                         num_threadhs=num_threads_tophat, 
+                         num_threads=num_threads_tophat, 
                          extra_args=tophat_args)
 
         # number of reads before filtering

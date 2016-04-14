@@ -340,7 +340,7 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
     log_handle = loggers[sample_id]['sl'][read_num]
     map_reads('sl', build_dirs['sl'], sample_id, read_num, 
-              num_threads_tophat=args.num_threads_tophat, log_handle)
+              args.num_threads_tophat, log_handle)
 
 #-----------------------------------------------------------------------------
 # Step 5: Compute UTR coordinates
@@ -416,7 +416,7 @@ def map_rsl_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
     log_handle = loggers[sample_id]['rsl'][read_num]
     map_reads('rsl', build_dirs['rsl'], sample_id, read_num,
-              num_threads_tophat=args.num_threads_tophat, log_handle)
+              args.num_threads_tophat, log_handle)
 
 #
 # RSL Step 3
@@ -470,7 +470,7 @@ def map_polya_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
     log_handle = loggers[sample_id]['polya'][read_num]
     map_reads('polya', build_dirs['polya'], sample_id, read_num,
-              num_threads_tophat=args.num_threads_tophat, log_handle)
+              args.num_threads_tophat, log_handle)
 
 #
 # Poly(A) Step 3
@@ -526,7 +526,7 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered Poly(T) reads back to the genome"""
     log_handle = loggers[sample_id]['polyt'][read_num]
     map_reads('polyt', build_dirs['polyt'], sample_id, read_num,
-              num_threads_tophat=args.num_threads_tophat, log_handle)
+              args.num_threads_tophat, log_handle)
 
 #
 # Poly(T) Step 3
