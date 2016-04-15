@@ -52,12 +52,12 @@ def parse_input():
     parser.add_argument('-f1', '--target-genome', dest='target_genome',
                         required=True, help=('Genome sequence FASTA filepath '
                         'for target species'))
-    parser.add_argument('-f2', '--nontarget-genome', dest='nontarget_genome',
+    parser.add_argument('-f2', '--host-genome', dest='host_genome',
                         help=('Genome sequence FASTA filepath for species to '
                               'be filtered out prior to mapping. (optional)'))
     parser.add_argument('-g1', '--target-annotations', dest='target_gff',
                         required=True, help='Genome annotation GFF')
-    parser.add_argument('-g2', '--nontarget-annotations', dest='nontarget_gff',
+    parser.add_argument('-g2', '--host-annotations', dest='host_gff',
                         help='Genome annotation GFF')
     parser.add_argument('-s', '--sl-sequence', dest='spliced_leader',
                         required=True, help='Spliced leader DNA sequence',
@@ -102,10 +102,10 @@ def parse_input():
     args.input_reads = os.path.expandvars(args.input_reads)
     args.target_gff = os.path.expandvars(args.target_gff)
 
-    if args.nontarget_genome:
-        args.nontarget_genome = os.path.expandvars(args.nontarget_genome)
-    if args.nontarget_gff:
-        args.nontarget_gff = os.path.expandvars(args.nontarget_gff)
+    if args.host_genome:
+        args.host_genome = os.path.expandvars(args.host_genome)
+    if args.host_gff:
+        args.host_gff = os.path.expandvars(args.host_gff)
 
     # @TODO Validate input
     return args
@@ -167,9 +167,9 @@ def create_build_dirs(args, sample_ids):
                       'fastq/genomic_reads_removed',
                       'tophat/mapped_to_target_untrimmed']
 
-    if args.nontarget_genome:
-        shared_subdirs = shared_subdirs + ['fastq/nontarget_reads_removed',
-                                        'tophat/mapped_to_nontarget']
+    if args.host_genome:
+        shared_subdirs = shared_subdirs + ['fastq/host_reads_removed',
+                                           'tophat/mapped_to_host']
 
     for sample_id in sample_ids:
         # shared directories

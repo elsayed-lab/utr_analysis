@@ -65,7 +65,7 @@ loggers = setup_loggers(args.build_directory, build_dirs, sample_ids)
 # Below are the ruffus tasks associated with the UTR analysis pipeline. The
 # first few tasks (0-2) are "common" tasks that are done regardless of the
 # feature of interest (SL or Poly(A)). For example -- mapping against a
-# "nontarget" (e.g. host) genome to remove unrelated reads, and removing reads
+# "host" (e.g. host) genome to remove unrelated reads, and removing reads
 # which map to the genome as-is, thus indicating they are not related to a
 # splicing or polyadenylation event.
 #
@@ -121,19 +121,19 @@ def check_for_bowtie_indices():
     ret = subprocess.call(bowtie_cmd)
 
     # stop here if we are only mapping to one genome
-    if not args.nontarget_genome:
+    if not args.host_genome:
         return
 
-    # check index for nontarget species
-    genome2 = os.path.splitext(args.nontarget_genome)[BASENAME_IDX]
+    # check index for host species
+    genome2 = os.path.splitext(args.host_genome)[BASENAME_IDX]
 
     # if index exists, stop here
     if os.path.exists('%s.1.bt2' % genome2):
         return
 
     # otherwise, create bowtie2 index
-    logging.info("# Building bowtie2 index for %s" % args.nontarget_genome)
-    bowtie_cmd = (['bowtie2-build', args.nontarget_genome, genome2])
+    logging.info("# Building bowtie2 index for %s" % args.host_genome)
+    bowtie_cmd = (['bowtie2-build', args.host_genome, genome2])
     logging.info("# Command:\n" + " ".join(bowtie_cmd))
     ret = subprocess.call(bowtie_cmd)
 
@@ -162,24 +162,24 @@ def check_genome_fastas():
         raise IOError("Missing target genome file")
 
     # stop here if we are only mapping to one genome
-    if not args.nontarget_genome:
+    if not args.host_genome:
         return
 
     # Next, check filter genome
-    nontarget_genome = os.path.splitext(args.nontarget_genome)[BASENAME_IDX]
+    host_genome = os.path.splitext(args.host_genome)[BASENAME_IDX]
 
     # if index exists, continue to next genome
-    if os.path.exists('%s.fa' % nontarget_genome):
+    if os.path.exists('%s.fa' % host_genome):
         pass
-    elif os.path.exists('%s.fasta' % nontarget_genome):
+    elif os.path.exists('%s.fasta' % host_genome):
         # if .fasta file exists, but not .fa, create a symlink
-        logging.info("# Creating symlink to %s for Tophat" % args.nontarget_genome)
-        os.symlink(nontarget_genome + '.fasta', nontarget_genome + '.fa')
+        logging.info("# Creating symlink to %s for Tophat" % args.host_genome)
+        os.symlink(host_genome + '.fasta', host_genome + '.fa')
     else:
         raise IOError("Missing filter genome file")
 
 #-----------------------------------------------------------------------------
-# Step 1: Filter nontarget reads (Optional)
+# Step 1: Filter host reads (Optional)
 #
 # Before looking for spliced leader (SL) and Poly(A) reads, we will first
 # remove any reads which come from an unrelated species such as host cells used
@@ -189,13 +189,13 @@ def check_genome_fastas():
 @follows(check_genome_fastas)
 @collate(args.input_reads,
          formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_(R?[1-2])(.*)?\.fastq(\.gz)?'),
-         ['%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_nontarget_reads_removed.1.fastq.gz' % build_dirs['shared'],
-          '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_nontarget_reads_removed.2.fastq.gz' % build_dirs['shared']],
+         ['%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_host_reads_removed.1.fastq.gz' % build_dirs['shared'],
+          '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_host_reads_removed.2.fastq.gz' % build_dirs['shared']],
           '{SAMPLE_ID[0]}')
-def filter_nontarget_reads(input_reads, output_reads, sample_id):
+def filter_host_reads(input_reads, output_reads, sample_id):
     # If we are only mapping to a single genome, we can just create
     # symlinks to the original input files and skip this step
-    if not args.nontarget_genome:
+    if not args.host_genome:
         # Determine which input corresponds to R1
         #if '1.fastq' in input_reads[0]:
         #    r1 = input_reads[0]
@@ -211,25 +211,25 @@ def filter_nontarget_reads(input_reads, output_reads, sample_id):
             os.symlink(input_reads[read_num], output_reads[read_num])
         return
 
-    logging.info("# Removing nontarget reads.")
+    logging.info("# Removing host reads.")
 
     # output directories
     tophat_dir = os.path.join(build_dirs['shared'], sample_id,
-                             'tophat', 'mapped_to_nontarget')
+                             'tophat', 'mapped_to_host')
     fastq_dir = os.path.join(build_dirs['shared'], sample_id, 'fastq')
 
     # output fastq filepaths
     output_fastq = os.path.join(
-        fastq_dir, "%s_nontarget_reads_removed.fastq.gz" % (sample_id))
+        fastq_dir, "%s_host_reads_removed.fastq.gz" % (sample_id))
 
     # check for gff
-    gff = args.nontarget_gff if args.nontarget_gff else None
+    gff = args.host_gff if args.host_gff else None
 
     # map reads and remove hits
-    filter_mapped_reads(input_reads[0], input_reads[1], args.nontarget_genome,
+    filter_mapped_reads(input_reads[0], input_reads[1], args.host_genome,
                         tophat_dir, output_fastq, logging, gff=gff,
                         num_threads_tophat=args.num_threads_tophat)
-    logging.info("# Finished removing nontarget reads.")
+    logging.info("# Finished removing host reads.")
 
 #-----------------------------------------------------------------------------
 # Step 2: Filter genomic reads
@@ -238,8 +238,8 @@ def filter_nontarget_reads(input_reads, output_reads, sample_id):
 # trimming. These reads likely represent actual features in the genome and not
 # the capped or polyadenylated reads we are interested in.
 #-----------------------------------------------------------------------------
-@subdivide(filter_nontarget_reads,
-           formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_nontarget_reads_removed_(?P<READ_NUM>R?[1-2])\.fastq\.gz'),
+@subdivide(filter_host_reads,
+           formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_host_reads_removed_(?P<READ_NUM>R?[1-2])\.fastq\.gz'),
            r'%s/{SAMPLE_ID}/fastq/{SAMPLE_ID}_genomic_reads_removed.*.fastq.gz',
            '{SAMPLE_ID}',
            '{READ_NUM}')

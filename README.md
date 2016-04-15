@@ -67,8 +67,8 @@ Usage
 ### Overview
 
     usage: utr_analysis.py [-h] -i INPUT_READS -d BUILD_DIRECTORY -f1
-                        TARGET_GENOME [-f2 NONTARGET_GENOME] -g1 TARGET_GFF
-                        [-g2 NONTARGET_GFF] -s SPLICED_LEADER
+                        TARGET_GENOME [-f2 HOST_GENOME] -g1 TARGET_GFF
+                        [-g2 HOST_GFF] -s SPLICED_LEADER
                         [--exclude-internal-sl-matches]
                         [--exclude-internal-polya-matches]
                         [--minimum-trimmed-length MINIMUM_TRIMMED_LENGTH]
@@ -76,6 +76,7 @@ Usage
                         [-m MIN_SL_LENGTH] [-p MIN_POLYA_LENGTH]
                         [-w WINDOW_SIZE] [-x MINIMUM_DIFFERENCES]
                         [--num-threads NUM_THREADS]
+                        [--num-threads-tophat NUM_THREADS_TOPHAT]
 
     Spliced Leader and poly-adenylation site analysis
 
@@ -88,12 +89,12 @@ Usage
                             Directory to save output to
     -f1 TARGET_GENOME, --target-genome TARGET_GENOME
                             Genome sequence FASTA filepath for target species
-    -f2 NONTARGET_GENOME, --nontarget-genome NONTARGET_GENOME
+    -f2 HOST_GENOME, --host-genome HOST_GENOME
                             Genome sequence FASTA filepath for species to be
                             filtered out prior to mapping. (optional)
     -g1 TARGET_GFF, --target-annotations TARGET_GFF
                             Genome annotation GFF
-    -g2 NONTARGET_GFF, --nontarget-annotations NONTARGET_GFF
+    -g2 HOST_GFF, --host-annotations HOST_GFF
                             Genome annotation GFF
     -s SPLICED_LEADER, --sl-sequence SPLICED_LEADER
                             Spliced leader DNA sequence
@@ -122,19 +123,9 @@ Usage
                             for a hit to be considered real. (default=2)
     --num-threads NUM_THREADS
                             Number of threads to use (default=4).
-
-Usage Example:
---------------
-
-    ./utr_analysis.py                                               \
-        -i "$RAW/tcruzir21/*/processed/*.filtered.fastq.gz"         \
-        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
-        -f1 TriTrypDB-27_TcruziCLBrenerEsmeraldo-like_Genome.fasta  \
-        -f2 mm10.fasta                                              \
-        -g TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff               \
-        --build-directory build/tcruzi                              \
-        --min-sl-length 12                                          \
-        --exclude-internal-polya-matches
+    --num-threads-tophat NUM_THREADS_TOPHAT
+                            Number of threads to use for each Tophat run.
+                            (default=1)
 
 ### Input read filename requirements
 
