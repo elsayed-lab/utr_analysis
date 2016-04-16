@@ -11,7 +11,6 @@ File parsing and I/O functions:
 """
 import argparse
 import csv
-import gzip
 import os
 import textwrap
 from BCBio import GFF
@@ -44,9 +43,9 @@ def parse_input():
 
     # Add arguments
     parser.add_argument('-i', '--input-reads', required=True,
-                        help=('RNA-Seq FASTQ or gzipped FASTQ glob string or'
-                              'a txt file containing filepaths to the samples'
-                              'to be used'))
+                        help=('RNA-Seq FASTQ or gzipped/xz-compressed FASTQ '
+                              'glob string or a txt file containing filepaths '
+                              'to the samples to be used'))
     parser.add_argument('-d', '--build-directory', required=True,
                         help='Directory to save output to')
     parser.add_argument('-f1', '--target-genome', dest='target_genome',
@@ -163,13 +162,10 @@ def create_build_dirs(args, sample_ids):
                                     polya_dir_suffix)
 
     # create subdirs based on matching parameters
-    shared_subdirs = ['ruffus',
-                      'fastq/genomic_reads_removed',
-                      'tophat/mapped_to_target_untrimmed']
+    shared_subdirs = ['fastq', 'tophat/mapped_to_target_untrimmed']
 
     if args.host_genome:
-        shared_subdirs = shared_subdirs + ['fastq/host_reads_removed',
-                                           'tophat/mapped_to_host']
+        shared_subdirs = shared_subdirs + ['tophat/mapped_to_host']
 
     for sample_id in sample_ids:
         # shared directories
@@ -182,7 +178,7 @@ def create_build_dirs(args, sample_ids):
         for base_dir in [sl_build_dir, rsl_build_dir,
                          polya_build_dir, polyt_build_dir]:
             for sub_dir in ['fastq/filtered', 'fastq/unfiltered',
-                            'results', 'ruffus', 'log', 'tophat']:
+                            'results', 'log', 'tophat']:
                 outdir = os.path.join(base_dir, sample_id, sub_dir)
                 if not os.path.exists(outdir):
                     os.makedirs(outdir, mode=0o755)
