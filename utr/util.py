@@ -139,6 +139,9 @@ def num_lines(filepath):
     """Returns the number of lines in a specified file"""
     if filepath.endswith('.gz'):
         fp = gzip.open(filepath, 'rb')
+    elif filepath.endswith('.xz'):
+        import backports.lzma as lzma
+        fp = lzma.open(filepath, 'rb')
     else:
         fp = open(filepath)
 

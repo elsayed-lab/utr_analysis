@@ -131,8 +131,16 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     # read_ids = []
 
     # Find all reads containing the sequence of interest
-    fastq = gzip.open(input_file, 'rb')
-    fastq_mated = gzip.open(input_file_mated, 'rb')
+    if input_file.endswith('.gz'):
+        fastq = gzip.open(input_file, 'rb')
+        fastq_mated = gzip.open(input_file_mated, 'rb')
+    elif input_file.endswith('.xz'):
+        import backports.lzma as lzma
+        fastq = lzma.open(input_file, 'rb')
+        fastq_mated = lzma.open(input_file_mated, 'rb')
+    else:
+        fastq = open(input_file, 'r')
+        fastq_mated = open(input_file_mated, 'r')
 
     # iterate over mated reads at same time
     mated_reads = readfq(fastq_mated)
