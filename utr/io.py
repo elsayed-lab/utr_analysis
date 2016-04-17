@@ -234,7 +234,7 @@ def readfq(fp):
                 yield name, seq, None # yield a fasta record instead
                 break
 
-def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
+def output_coordinates(results, feature_name, filepath, target_gff, track_color='0,0,255'):
     """
     Outputs the feature coordinates as a GFF3 file.
 
@@ -257,7 +257,7 @@ def output_coordinates(results, feature_name, filepath, track_color='0,0,255'):
     fp.write("#track name=%s color=%s\n" % (feature_name.upper(), track_color))
 
     # Copy chromosome entries from primary GFF
-    annotations_fp = open(args.target_gff)
+    annotations_fp = open(target_gff)
 
     for line in annotations_fp:
         if "\tchromosome\t" in line:
@@ -370,13 +370,13 @@ def combine_gff_results(input_gffs):
     # Return combined results
     return results
 
-def load_annotations():
+def load_annotations(target_gff):
     """Loads genome annotations from specified GFF(s)."""
     # Get chromosomes/contigs from GFF file
     chromosomes = {}
 
     # Load existing gene annotations
-    annotations_fp = open(args.target_gff)
+    annotations_fp = open(target_gff)
 
     for entry in GFF.parse(annotations_fp):
         if len(entry.features) > 0 and entry.features[0].type in ['chromosome', 'contig']:

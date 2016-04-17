@@ -269,7 +269,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
     log_handle.info("# Finished processing %s" % os.path.basename(input_file))
 
-def compute_coordinates(target_genome, feature_name, build_dir, sample_id,
+def compute_coordinates(target_genome, target_gff, feature_name, build_dir, sample_id,
                         read_num, min_feature_length, minimum_differences, 
                         window_size, log_handle):
     """
@@ -305,7 +305,7 @@ def compute_coordinates(target_genome, feature_name, build_dir, sample_id,
     chr_sequences = {x.id:x for x in genome}
 
     # Get chromosomes/contigs from GFF file
-    chromosomes = load_annotations()
+    chromosomes = load_annotations(target_gff)
 
     # Create a dictionary to keep track of the coordinates.
     results = {}
@@ -627,7 +627,7 @@ def compute_coordinates(target_genome, feature_name, build_dir, sample_id,
         output_dir, feature_name, read_num
     )
 
-    output_coordinates(results, feature_name, output_filepath)
+    output_coordinates(results, feature_name, output_filepath, target_gff)
 
 def is_inside_cds(chromosome, location, window_size):
     """

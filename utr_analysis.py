@@ -361,8 +361,8 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped trans-splicing events "
                  "(%s)" % sample_id)
     log_handle = loggers[sample_id]['sl'][read_num]
-    compute_coordinates(args.target_genome, 'sl', build_dirs['sl'], sample_id,
-                        read_num, args.min_sl_length, 
+    compute_coordinates(args.target_genome, args.target_gff, 'sl',
+                        build_dirs['sl'], sample_id, read_num, args.min_sl_length, 
                         args.minimum_differences, args.window_size, log_handle)
     logging.info("# Finished!")    
 
@@ -437,8 +437,8 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped trans-splicing events "
                  "(%s, reverse)" % sample_id)
     log_handle = loggers[sample_id]['rsl'][read_num]
-    compute_coordinates(args.target_genome, 'rsl', build_dirs['rsl'],
-                        sample_id, read_num, args.min_sl_length, 
+    compute_coordinates(args.target_genome, args.target_gff, 'rsl',
+                        build_dirs['rsl'], sample_id, read_num, args.min_sl_length, 
                         args.minimum_differences, args.window_size, log_handle)
     logging.info("# Finished!")    
 
@@ -498,8 +498,8 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped polyadenylation sites "
                  "(%s)" % sample_id)
     log_handle = loggers[sample_id]['polya'][read_num]
-    compute_coordinates(args.target_genome, 'polya', build_dirs['polya'],
-                        sample_id, read_num, args.min_polya_length,
+    compute_coordinates(args.target_genome, args.target_gff, 'polya',
+                        build_dirs['polya'], sample_id, read_num, args.min_polya_length,
                         args.minimum_differences, args.window_size, log_handle)
     logging.info("# Finished!")    
 
@@ -561,8 +561,8 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Computing coordinates for mapped polyadenylation sites "
                  "(%s, reverse)" % sample_id)
     log_handle = loggers[sample_id]['polyt'][read_num]
-    compute_coordinates(args.target_genome, 'polyt', build_dirs['polyt'],
-                        sample_id, read_num, args.min_polya_length,
+    compute_coordinates(args.target_genome, args.target_gff, 'polyt',
+                        build_dirs['polyt'], sample_id, read_num, args.min_polya_length,
                         args.minimum_differences, args.window_size, log_handle)
     logging.info("# Finished!")    
 
@@ -586,7 +586,7 @@ def combine_sl_results(input_files, output_file):
 
     # Save summary GFFs
     sl_outfile = os.path.join(build_dirs['combined'], 'spliced_leader.gff')
-    output_coordinates(sl_combined, 'sl', sl_outfile, track_color='83,166,156')
+    output_coordinates(sl_combined, 'sl', sl_outfile, args.target_gff, track_color='83,166,156')
 
 @merge([compute_polya_coordinates,
         compute_polyt_coordinates],
@@ -601,7 +601,7 @@ def combine_polya_results(input_files, output_file):
     # Save summary GFFs
     polya_outfile = os.path.join(build_dirs['combined'], 'polya.gff')
     output_coordinates(polya_combined, 'polya', polya_outfile,
-                       track_color='166,83,93')
+                       args.target_gff, track_color='166,83,93')
 
 #-----------------------------------------------------------------------------
 # Run pipeline
