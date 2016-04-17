@@ -202,7 +202,8 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         log_handle.info("# Skipping %s: output already exists" % tophat_dir)
 
     # convert remaining unmapped reads from bam to fastq
-    ret = run_bam2fastx(bam_input, output_fastq, log_handle)
+    if not os.path.exists(output_fastq):
+        ret = run_bam2fastx(bam_input, output_fastq, log_handle)
 
     if ret != 0:
         log_handle.error("# Error running bam2fastx (%s)!" % genome)

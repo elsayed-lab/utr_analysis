@@ -15,9 +15,11 @@ import pysam
 import re
 import StringIO
 from Bio import SeqIO
+from io import output_coordinates
 
 def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
-                  build_dir, sample_id, read_num, log_handle,
+                  build_dir, sample_id, read_num, minimum_trimmed_length,
+                  max_dist_from_edge, log_handle,
                   trimmed_side='left', reverse=False):
     """
     Loads a collection of RNA-Seq reads and filters the reads so as to only
@@ -46,6 +48,10 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         ID of the sample being scanned.
     read_num: str
         Which of the mated reads should be scanned. [R1|R2]
+    minimum_trimmed_length: int
+        Minimum length of read allowed after matching feature is trimmed.
+    max_dist_from_edge: int
+        Maximum distance SL/Poly(A) feature can be from the edge of read.
     log_handle: logging.Handle
         Handler to use for logging.
     trimmed_side: str
@@ -185,7 +191,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
                             read[QUALITY_IDX][:match_start]]
 
         # skip reads that are less than the required amount after trimming
-        if len(trimmed_read[SEQUENCE_IDX]) < args.minimum_trimmed_length:
+        if len(trimmed_read[SEQUENCE_IDX]) < minimum_trimmed_length:
             continue
 
         # length of portion trimmed off
@@ -194,7 +200,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
         # for internal matches, skip reads where match is not close enough to
         # the edge of the read
-        if (trimmed_part_length - match_length) > args.max_dist_from_edge:
+        if (trimmed_part_length - match_length) > max_dist_from_edge:
             continue
 
         # write length
@@ -255,7 +261,9 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
     log_handle.info("# Finished processing %s" % os.path.basename(input_file))
 
-def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle):
+def compute_coordinates(target_genome, feature_name, build_dir, sample_id,
+                        read_num, min_feature_length, minimum_differences, 
+                        window_size, log_handle):
     """
     Outputs coordinates and frequencies of putative UTR features to a GFF file.
 
@@ -285,7 +293,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle
     output_dir = '%s/%s/results' % (build_dir, sample_id)
 
     # Load genome sequence
-    genome = SeqIO.parse(args.target_genome, 'fasta')
+    genome = SeqIO.parse(target_genome, 'fasta')
     chr_sequences = {x.id:x for x in genome}
 
     # Get chromosomes/contigs from GFF file
@@ -413,12 +421,6 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle
         else:
             acceptor_site = read.pos + read.rlen + 1
 
-        # Minimum length of feature
-        if feature_name in ['sl', 'rsl']:
-            min_feature_length = args.min_sl_length
-        else:
-            min_feature_length = args.min_polya_length
-
         # If read is mapped too close to end of chromosome, skip it
         # left end
         if read.pos < (min_feature_length - 1):
@@ -532,7 +534,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle
             # differences between the match and the corresponding genomic
             # sequence (slower)
             seq_dist = distance.hamming(matched_seq, matched_genome_seq)
-            if seq_dist < args.minimum_differences:
+            if seq_dist < minimum_differences:
                 continue
         except:
             # occurs when sl is smaller than genome/trimed_portion
@@ -545,14 +547,14 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle
 
         # Check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
-        if is_inside_cds(chromosomes[chromosome], acceptor_site):
+        if is_inside_cds(chromosomes[chromosome], acceptor_site, window_size):
             inside_cds.writerow([read.qname, chromosome, strand, acceptor_site])
             num_inside_cds = num_inside_cds + 1
             continue
 
         # Find nearest gene
         gene = find_closest_gene(chromosomes[chromosome], feature_name,
-                                 acceptor_site, acceptor_site_side)
+                                 acceptor_site, acceptor_site_side, window_size)
 
         # If no nearby genes were found, stop here
         if gene is None:
@@ -619,7 +621,7 @@ def compute_coordinates(feature_name, build_dir, sample_id, read_num, log_handle
 
     output_coordinates(results, feature_name, output_filepath)
 
-def is_inside_cds(chromosome, location):
+def is_inside_cds(chromosome, location, window_size):
     """
     Checks to see if a putative acceptor site is inside an annotated CDS.
 
@@ -640,7 +642,7 @@ def is_inside_cds(chromosome, location):
     http://biopython.org/DIST/docs/api/Bio.SeqFeature.FeatureLocation-class.html
     """
     # Number of bases before or after feature
-    half_window = int(args.window_size / 2)
+    half_window = int(window_size / 2)
 
     # Extract region of sequence surrounding the putative feature of
     # interest
@@ -665,7 +667,8 @@ def is_inside_cds(chromosome, location):
 
     return False
 
-def find_closest_gene(chromosome, feature_name, location, acceptor_site_side):
+def find_closest_gene(chromosome, feature_name, location, acceptor_site_side,
+                      window_size):
     """
     Finds the closest gene to a specified location that is in the expected
     orientation.
@@ -673,8 +676,8 @@ def find_closest_gene(chromosome, feature_name, location, acceptor_site_side):
     # chromosome boundary
     ch_end =  int(chromosome.features[0].location.end)
 
-    # 1. Get genes within +/- args.window_size/2 bases of location
-    half_win = args.window_size / 2
+    # 1. Get genes within +/- window_size/2 bases of location
+    half_win = window_size / 2
 
     # Window boundaries
 
