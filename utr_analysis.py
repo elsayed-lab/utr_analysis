@@ -42,7 +42,7 @@ args = parse_input()
 
 # For simplicity, the sample ID for a given file is assumed to be everything
 # in the filename up to the mate pair specification.
-input_regex = re.compile(r'^(.*/)?(?P<SAMPLE_ID>.*)_(R?[1-2])')
+input_regex = re.compile(r'^(.*/)?(?P<SAMPLE_ID>.*)_(R?[12])')
 
 sample_ids = []
 
@@ -188,7 +188,7 @@ def check_genome_fastas():
 @follows(check_for_bowtie_indices)
 @follows(check_genome_fastas)
 @collate(args.input_reads,
-         formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_(R?[1-2])(.*)?\.fastq(?P<EXT>\.[gx]z)?'),
+         formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_R?([12])(.*)?\.fastq(?P<EXT>\.[gx]z)?'),
          ['%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_host_reads_removed.1.fastq{EXT[0]}' % build_dirs['shared'],
           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_host_reads_removed.2.fastq{EXT[0]}' % build_dirs['shared']],
           '{SAMPLE_ID[0]}',
@@ -242,8 +242,8 @@ def filter_host_reads(input_reads, output_reads, sample_id, ext):
 # the capped or polyadenylated reads we are interested in.
 #-----------------------------------------------------------------------------
 @subdivide(filter_host_reads,
-           formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_host_reads_removed.(?P<READ_NUM>R?[1-2])\.fastq(?P<EXT>\.[xg]z)?'),
-           r'%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_genomic_reads_removed.*.fastq{EXT[0]}',
+           formatter(r'^(.*/)?(?P<SAMPLE_ID>.*)_host_reads_removed.R?(?P<READ_NUM>[12])\.fastq(?P<EXT>\.[xg]z)?'),
+           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_genomic_reads_removed.*.fastq{EXT[0]}' % build_dirs['shared'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}',
            '{EXT[0]}')
@@ -289,7 +289,7 @@ def filter_genomic_reads(input_files, output_files, sample_id, read_num, ext):
 #      boundaries of the match, and thus, where to trim reads.
 #-----------------------------------------------------------------------------
 @transform(filter_genomic_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.(?P<READ_NUM>R?[12]).fastq(?P<EXT>\.[xg]z)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
            '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_1_sl_trimmed.fastq{EXT[0]}' % build_dirs['sl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -333,7 +333,7 @@ def find_sl_reads(input_reads, output_file, sample_id, read_num):
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
 @transform(find_sl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_(?P<READ_NUM>R?[12])_1_sl_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_sl_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['sl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -353,7 +353,7 @@ def map_sl_reads(input_file, output_file, sample_id, read_num):
 # locations (e.g. not inside a CDS.)
 #-----------------------------------------------------------------------------
 @transform(map_sl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/(?P<READ_NUM>R?[12])_filtered_trimmed/accepted_hits.bam'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/R?(?P<READ_NUM>[12])_filtered_trimmed/accepted_hits.bam'),
            '%s/{SAMPLE_ID[0]}/results/sl_coordinates_{READ_NUM[0]}.gff' % build_dirs['sl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -374,7 +374,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 # Reverse SL Step 1
 #
 @transform(filter_genomic_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.(?P<READ_NUM>R?[12]).fastq(?P<EXT>\.[xg]z)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
            '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_1_rsl_trimmed.fastq{EXT[0]}' % build_dirs['rsl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -415,7 +415,7 @@ def find_rsl_reads(input_reads, output_file, sample_id, read_num):
 # RSL Step 2
 #
 @transform(find_rsl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_(?P<READ_NUM>R?[12])_1_rsl_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_rsl_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['rsl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -429,7 +429,7 @@ def map_rsl_reads(input_file, output_file, sample_id, read_num):
 # RSL Step 3
 #
 @transform(map_rsl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/(?P<READ_NUM>R?[12])_filtered_trimmed/accepted_hits.bam'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/R?(?P<READ_NUM>[12])_filtered_trimmed/accepted_hits.bam'),
            '%s/{SAMPLE_ID[0]}/results/rsl_coordinates_{READ_NUM[0]}.gff' % build_dirs['rsl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -450,7 +450,7 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
 # Poly(A) Step 1
 #
 @transform(filter_genomic_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.(?P<READ_NUM>R?[12]).fastq(?P<EXT>\.[xg]z)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
            '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_1_polya_trimmed.fastq{EXT[0]}' % build_dirs['polya'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -476,7 +476,7 @@ def find_polya_reads(input_reads, output_file, sample_id, read_num):
 # Poly(A) Step 2
 #
 @transform(find_polya_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_(?P<READ_NUM>R?[12])_1_polya_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_polya_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['polya'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -490,7 +490,7 @@ def map_polya_reads(input_file, output_file, sample_id, read_num):
 # Poly(A) Step 3
 #
 @transform(map_polya_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/(?P<READ_NUM>R?[12])_filtered_trimmed/accepted_hits.bam'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/R?(?P<READ_NUM>[12])_filtered_trimmed/accepted_hits.bam'),
            '%s/{SAMPLE_ID[0]}/results/polya_coordinates_{READ_NUM[0]}.gff' % build_dirs['polya'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -511,7 +511,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 # Poly(T) Step 1
 #
 @transform(filter_genomic_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.(?P<READ_NUM>R?[12]).fastq(?P<EXT>\.[xg]z)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
            '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_1_polyt_trimmed.fastq{EXT[0]}' % build_dirs['polyt'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -539,7 +539,7 @@ def find_polyt_reads(input_reads, output_file, sample_id, read_num):
 # Poly(T) Step 2
 #
 @transform(find_polyt_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_(?P<READ_NUM>R?[12])_1_polyt_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_polyt_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['polyt'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -553,7 +553,7 @@ def map_polyt_reads(input_file, output_file, sample_id, read_num):
 # Poly(T) Step 3
 #
 @transform(map_polyt_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/(?P<READ_NUM>R?[12])_filtered_trimmed/accepted_hits.bam'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/R?(?P<READ_NUM>[12])_filtered_trimmed/accepted_hits.bam'),
            '%s/{SAMPLE_ID[0]}/results/polyt_coordinates_{READ_NUM[0]}.gff' % build_dirs['polyt'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -576,7 +576,7 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
 #-----------------------------------------------------------------------------
 @merge([compute_sl_coordinates,
         compute_rsl_coordinates],
-        # formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_(?P<READ_NUM>R?[1-2]).gff'),
+        # formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_R?(?P<READ_NUM>[12]).gff'),
         os.path.join(build_dirs['combined'], 'spliced_leader.gff'))
 def combine_sl_results(input_files, output_file):
     # Combine spliced leader output
@@ -590,7 +590,7 @@ def combine_sl_results(input_files, output_file):
 
 @merge([compute_polya_coordinates,
         compute_polyt_coordinates],
-        # formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_(?P<READ_NUM>R?[1-2]).gff'),
+        # formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_R?(?P<READ_NUM>[12]).gff'),
         os.path.join(build_dirs['combined'], 'polya.gff'))
 def combine_polya_results(input_files, output_file):
     # Combine spliced leader output

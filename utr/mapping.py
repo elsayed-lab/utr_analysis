@@ -13,7 +13,8 @@ import sys
 from util import run_command, num_lines
 
 def run_tophat(output_dir, genome, log_handle, r1, r2="", gff=None,
-               num_threads=1, read_mismatches=2, max_multihits=20, extra_args=""):
+               num_threads=1, read_mismatches=2, max_multihits=20,
+               sort_by_name=False, extra_args=""):
     """
     Uses Tophat to map reads with the specified settings.
 
@@ -91,12 +92,13 @@ def run_tophat(output_dir, genome, log_handle, r1, r2="", gff=None,
 
     # sort and index bam output using samtools
     log_handle.info("# Sorting and indexing Tophat output")
-    sort_and_index(os.path.join(output_dir, 'accepted_hits'), log_handle)
-    sort_and_index(os.path.join(output_dir, 'unmapped'), log_handle)
+    sort_and_index(os.path.join(output_dir, 'accepted_hits'), log_handle,
+                   sort_by_name)
+    sort_and_index(os.path.join(output_dir, 'unmapped'), log_handle, sort_by_name)
 
     return 0
 
-def sort_and_index(base_output, log_handle):
+def sort_and_index(base_output, log_handle, sort_by_name=False):
     """Sorts and indexes .bam files using samtools.
    
     Arguments
@@ -107,7 +109,8 @@ def sort_and_index(base_output, log_handle):
         Handler to use for logging.
     """
     # sort bam
-    sort_cmd = 'samtools sort %s -o %s' % (
+    sort_cmd = 'samtools sort %s %s -o %s' % (
+        "-n" if sort_by_name else "",
         base_output + ".bam", base_output + "_sorted.bam")
     run_command(sort_cmd, log_handle)
 
@@ -185,6 +188,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         ret = run_tophat(tophat_dir, genome, log_handle, r1, r2,
                          read_mismatches=read_mismatches, gff=gff,
                          num_threads=num_threads_tophat, 
+                         sort_by_name=True,
                          extra_args=tophat_args)
 
         # number of reads before filtering
@@ -207,10 +211,10 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
     if not os.path.exists(r1_fastq):
         ret = run_bam2fastx(bam_input, output_fastq, log_handle)
 
-    if ret != 0:
-        log_handle.error("# Error running bam2fastx (%s)!" % genome)
-        print("# Error running bam2fastx (%s)!" % genome)
-        sys.exit()
+        if ret != 0:
+            log_handle.error("# Error running bam2fastx (%s)!" % genome)
+            print("# Error running bam2fastx (%s)!" % genome)
+            sys.exit()
 
 def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, log_handle):
     """
@@ -242,8 +246,8 @@ def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, 
     basedir = '%s/%s/fastq' % (build_dir, sample_id)
 
     # R1 input filepath (including matched sequence)
-    if read_num in ['1', 'R1']:
-        r2_suffix = '2' if read_num == '1' else 'R2'
+    if read_num == '1':
+        r2_suffix = '2'
 
         r1_filepath = (
             '%s/unfiltered/%s_%s_1_%s_trimmed.fastq.gz' %
@@ -258,7 +262,7 @@ def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, 
             r2_filepath = ""
     # R2 input filepath
     else:
-        r1_suffix = '1' if read_num == '2' else 'R1'
+        r1_suffix = '1'
         r2_filepath = (
             '%s/unfiltered/%s_%s_2_%s_trimmed.fastq.gz' %
             (basedir, sample_id, read_num, feature_name)

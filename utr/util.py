@@ -113,7 +113,7 @@ def setup_loggers(root_dir, build_dirs, sample_ids):
         for analysis in ['sl', 'rsl', 'polya', 'polyt']:
             loggers[sample_id][analysis] = {}
 
-            for read_num in ['R1', 'R2']:
+            for read_num in ['1', '2']:
                 if analysis == 'sl':
                     bdir = build_dirs['sl']
                 elif analysis == 'rsl':
@@ -134,6 +134,8 @@ def setup_loggers(root_dir, build_dirs, sample_ids):
                 handler = logging.FileHandler(sample_log_name)
                 handler.setFormatter(formatter)
                 loggers[sample_id][analysis][read_num].addHandler(handler)
+
+    return loggers
 
 def num_lines(filepath):
     """Returns the number of lines in a specified file"""

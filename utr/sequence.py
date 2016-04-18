@@ -15,7 +15,8 @@ import pysam
 import re
 import StringIO
 from Bio import SeqIO
-from io import output_coordinates
+from io import output_coordinates, readfq
+from util import num_lines, gzip_str
 
 def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
                   build_dir, sample_id, read_num, minimum_trimmed_length,
@@ -47,7 +48,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     sample_id: str
         ID of the sample being scanned.
     read_num: str
-        Which of the mated reads should be scanned. [R1|R2]
+        Which of the mated reads should be scanned. [1|2]
     minimum_trimmed_length: int
         Minimum length of read allowed after matching feature is trimmed.
     max_dist_from_edge: int
@@ -69,13 +70,13 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     or right read:
 
     1. Sequence found in R1
-        *_R1_1_xxx_untrimmed.fastq
-        *_R1_1_xxx_trimmed.fastq
-        *_R1_2.fastq
+        *_1_1_xxx_untrimmed.fastq
+        *_1_1_xxx_trimmed.fastq
+        *_1_2.fastq
     2. Sequence found in R2
-        *_R2_2_xxx_untrimmed.fastq
-        *_R2_2_xxx_trimmed.fastq
-        *_R2_1.fastq
+        *_2_2_xxx_untrimmed.fastq
+        *_2_2_xxx_trimmed.fastq
+        *_2_1.fastq
     """
     #--------------------------------------
     # FASTQ row indices
@@ -107,7 +108,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     match_lengths_fp = gzip.open(output_lengths, 'wb')
 
     # mated reads
-    read_num_other = "R1" if read_num == "R2" else "R2"
+    read_num_other = "1" if read_num == "2" else "2"
     input_file_mated = input_file.replace("." + read_num[-1],
                                           "." + read_num_other[-1])
     output_mated_reads = "%s_%s.fastq.gz" % (output_base[:-2], read_num_other)
@@ -128,7 +129,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     mated_reads_buffer = StringIO.StringIO()
 
     # Keep track of matched read IDs
-    # read_ids = []
+    read_ids = []
 
     # Find all reads containing the sequence of interest
     if input_file.endswith('.gz'):
@@ -347,7 +348,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir, samp
     untrimmed_reads = {}
 
     for read in sam_untrimmed:
-        rnum = 'R1' if read.is_read1 else 'R2'
+        rnum = '1' if read.is_read1 else '2'
         if not read.qname in untrimmed_reads:
             untrimmed_reads[read.qname] = {rnum:read}
         else:
@@ -376,13 +377,15 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir, samp
     # Get coordinate and strand for each read in bam file
     for read in sam:
         # Get read where feature sequence was found
-        if ((read.is_read1 and read_num == 'R2') or
-            (read.is_read2 and read_num == 'R1')):
+        if ((read.is_read1 and read_num == '2') or
+            (read.is_read2 and read_num == '1')):
             continue
 
         # TESTING 2015/04/13
         if read.qname in read_ids:
+            print("Skipping duplicate read: %s" % read.qname)
             import pdb; pdb.set_trace()
+            #continue
 
         read_ids.append(read.qname)
 
