@@ -39,7 +39,7 @@ def run_command(cmd, log_handle, wait=True):
     return process.returncode
 
 
-def gzip_str(filepath, strbuffer):
+def gzip_str(filepath, strbuffer, chunk_size=65536):
     """Takes a StringIO buffer and writes the output to a gzip-compressed
     file."""
     # go to beginning of string buffer
@@ -53,7 +53,14 @@ def gzip_str(filepath, strbuffer):
 
     # write contents to a gzip-compressed file
     fp = gzip.open(outfile, 'wb')
-    fp.write(strbuffer.read())
+
+    # to avoid overflow errors, we will read from the stream in chunks
+    contents = strbuffer.read(chunk_size)
+
+    while contents != '':
+        fp.write(contents)
+        contents = strbuffer.read(chunk_size)
+
     fp.close()
 
 def get_next_file_name(base_name):
@@ -155,3 +162,4 @@ def num_lines(filepath):
     return i
 
     return loggers
+

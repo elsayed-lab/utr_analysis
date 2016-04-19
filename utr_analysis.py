@@ -333,7 +333,7 @@ def find_sl_reads(input_reads, output_file, sample_id, read_num):
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
 @transform(find_sl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_sl_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_sl_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['sl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -415,7 +415,7 @@ def find_rsl_reads(input_reads, output_file, sample_id, read_num):
 # RSL Step 2
 #
 @transform(find_rsl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_rsl_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_rsl_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['rsl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -476,7 +476,7 @@ def find_polya_reads(input_reads, output_file, sample_id, read_num):
 # Poly(A) Step 2
 #
 @transform(find_polya_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_polya_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_polya_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['polya'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
@@ -539,7 +539,7 @@ def find_polyt_reads(input_reads, output_file, sample_id, read_num):
 # Poly(T) Step 2
 #
 @transform(find_polyt_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_1_polyt_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_polyt_trimmed.fastq(?P<EXT>\.gz)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['polyt'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')

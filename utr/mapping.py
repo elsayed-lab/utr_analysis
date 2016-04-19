@@ -131,6 +131,9 @@ def run_bam2fastx(bam, fastq, log_handle):
     """
     Uses the tophat bam2fastx tool to convert a bam file to fastq
 
+    Note that bam2fastx will detect the .gz extension at the end of the output
+    filename and generate gzip-compressed output.
+
     Arguments
     ---------
     bam: str
@@ -140,6 +143,10 @@ def run_bam2fastx(bam, fastq, log_handle):
     log_handle: logging.Handle
         Handler to use for logging.
     """
+    # if output is expected to be xz-compressed, first generate uncompressed
+    # fastq output
+    fastq = fastq.replace('.xz', '')
+
     #bam2fastx parameters:
     #    -q fastq
     #    -A all reads
@@ -209,12 +216,19 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
     r1_fastq = output_fastq.replace('removed.fastq', 'removed.1.fastq')
 
     if not os.path.exists(r1_fastq):
+        # run bam2fastx to convert unmapped bam file to fastq
         ret = run_bam2fastx(bam_input, output_fastq, log_handle)
 
         if ret != 0:
             log_handle.error("# Error running bam2fastx (%s)!" % genome)
             print("# Error running bam2fastx (%s)!" % genome)
             sys.exit()
+
+        # in the case of xz-compressed files, uncompressed .fastq files
+        # are outputted from the above command so we will now compress those
+        if output_fastq.endswith('.xz'):
+            uncompressed = output_fastq.replace('.xz', '')
+            ret = run_command('xz %s' % uncompressed, log_handle)
 
 def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, log_handle):
     """

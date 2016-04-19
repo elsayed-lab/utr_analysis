@@ -13,7 +13,7 @@ import gzip
 import os
 import pysam
 import re
-import StringIO
+import cStringIO
 from Bio import SeqIO
 from io import output_coordinates, readfq
 from util import num_lines, gzip_str
@@ -124,9 +124,9 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     log_handle.info("# Using Regex patten:\n %s" % feature_regex)
 
     # open output string buffer (will write to compressed file later)
-    reads_trimmed = StringIO.StringIO()
-    reads_untrimmed = StringIO.StringIO()
-    mated_reads_buffer = StringIO.StringIO()
+    reads_trimmed = cStringIO.StringIO()
+    reads_untrimmed = cStringIO.StringIO()
+    mated_reads_buffer = cStringIO.StringIO()
 
     # Keep track of matched read IDs
     read_ids = []
