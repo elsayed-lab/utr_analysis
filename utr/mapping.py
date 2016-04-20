@@ -214,6 +214,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
 
     # convert remaining unmapped reads from bam to fastq
     r1_fastq = output_fastq.replace('removed.fastq', 'removed.1.fastq')
+    r2_fastq = output_fastq.replace('removed.fastq', 'removed.2.fastq')
 
     if not os.path.exists(r1_fastq):
         # run bam2fastx to convert unmapped bam file to fastq
@@ -227,8 +228,10 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
         # in the case of xz-compressed files, uncompressed .fastq files
         # are outputted from the above command so we will now compress those
         if output_fastq.endswith('.xz'):
-            uncompressed = output_fastq.replace('.xz', '')
-            ret = run_command('xz %s' % uncompressed, log_handle)
+            uncompressed_r1 = r1_fastq.replace('.xz', '')
+            uncompressed_r2 = r2_fastq.replace('.xz', '')
+            ret = run_command('xz %s' % uncompressed_r1, log_handle)
+            ret = run_command('xz %s' % uncompressed_r2, log_handle)
 
 def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, log_handle):
     """
