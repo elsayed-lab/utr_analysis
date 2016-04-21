@@ -15,7 +15,7 @@ import pysam
 import re
 import cStringIO
 from Bio import SeqIO
-from io import output_coordinates, readfq
+from io import output_coordinates, load_annotations, readfq
 from util import num_lines, gzip_str
 
 def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
@@ -270,7 +270,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
     log_handle.info("# Finished processing %s" % os.path.basename(input_file))
 
-def compute_coordinates(target_genome, target_gff, feature_name, build_dir, sample_id,
+def compute_coordinates(target_genome, target_gff, feature_name, build_dir, 
+                        shared_build_dir, sample_id,
                         read_num, min_feature_length, minimum_differences, 
                         window_size, log_handle):
     """

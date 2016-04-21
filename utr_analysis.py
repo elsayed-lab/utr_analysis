@@ -340,7 +340,7 @@ def find_sl_reads(input_reads, output_file, sample_id, read_num):
 def map_sl_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered spliced-leader containing reads back to the genome"""
     log_handle = loggers[sample_id]['sl'][read_num]
-    map_reads('sl', build_dirs['sl'], sample_id, read_num, 
+    map_reads('sl', args.target_genome, args.target_gff, build_dirs['sl'], sample_id, read_num, 
               args.num_threads_tophat, log_handle)
 
 #-----------------------------------------------------------------------------
@@ -362,8 +362,9 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
                  "(%s)" % sample_id)
     log_handle = loggers[sample_id]['sl'][read_num]
     compute_coordinates(args.target_genome, args.target_gff, 'sl',
-                        build_dirs['sl'], sample_id, read_num, args.min_sl_length, 
-                        args.minimum_differences, args.window_size, log_handle)
+                        build_dirs['sl'], build_dirs['shared'], sample_id,
+                        read_num, args.min_sl_length, args.minimum_differences,
+                        args.window_size, log_handle)
     logging.info("# Finished!")    
 
 #-----------------------------------------------------------------------------
@@ -422,7 +423,7 @@ def find_rsl_reads(input_reads, output_file, sample_id, read_num):
 def map_rsl_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
     log_handle = loggers[sample_id]['rsl'][read_num]
-    map_reads('rsl', build_dirs['rsl'], sample_id, read_num,
+    map_reads('rsl', args.target_genome, args.target_gff, build_dirs['rsl'], sample_id, read_num,
               args.num_threads_tophat, log_handle)
 
 #
@@ -438,8 +439,9 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
                  "(%s, reverse)" % sample_id)
     log_handle = loggers[sample_id]['rsl'][read_num]
     compute_coordinates(args.target_genome, args.target_gff, 'rsl',
-                        build_dirs['rsl'], sample_id, read_num, args.min_sl_length, 
-                        args.minimum_differences, args.window_size, log_handle)
+                        build_dirs['rsl'], build_dirs['shared'], sample_id,
+                        read_num, args.min_sl_length, args.minimum_differences,
+                        args.window_size, log_handle)
     logging.info("# Finished!")    
 
 #-----------------------------------------------------------------------------
@@ -483,7 +485,7 @@ def find_polya_reads(input_reads, output_file, sample_id, read_num):
 def map_polya_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered poly-adenylated reads back to the genome"""
     log_handle = loggers[sample_id]['polya'][read_num]
-    map_reads('polya', build_dirs['polya'], sample_id, read_num,
+    map_reads('polya', args.target_genome, args.target_gff, build_dirs['polya'], sample_id, read_num,
               args.num_threads_tophat, log_handle)
 
 #
@@ -499,7 +501,8 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
                  "(%s)" % sample_id)
     log_handle = loggers[sample_id]['polya'][read_num]
     compute_coordinates(args.target_genome, args.target_gff, 'polya',
-                        build_dirs['polya'], sample_id, read_num, args.min_polya_length,
+                        build_dirs['polya'], build_dirs['shared'], sample_id,
+                        read_num, args.min_polya_length,
                         args.minimum_differences, args.window_size, log_handle)
     logging.info("# Finished!")    
 
@@ -546,7 +549,7 @@ def find_polyt_reads(input_reads, output_file, sample_id, read_num):
 def map_polyt_reads(input_file, output_file, sample_id, read_num):
     """Maps the filtered Poly(T) reads back to the genome"""
     log_handle = loggers[sample_id]['polyt'][read_num]
-    map_reads('polyt', build_dirs['polyt'], sample_id, read_num,
+    map_reads('polyt', args.target_genome, args.target_gff, build_dirs['polyt'], sample_id, read_num,
               args.num_threads_tophat, log_handle)
 
 #
@@ -562,7 +565,8 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
                  "(%s, reverse)" % sample_id)
     log_handle = loggers[sample_id]['polyt'][read_num]
     compute_coordinates(args.target_genome, args.target_gff, 'polyt',
-                        build_dirs['polyt'], sample_id, read_num, args.min_polya_length,
+                        build_dirs['polyt'], build_dirs['shared'], sample_id,
+                        read_num, args.min_polya_length,
                         args.minimum_differences, args.window_size, log_handle)
     logging.info("# Finished!")    
 

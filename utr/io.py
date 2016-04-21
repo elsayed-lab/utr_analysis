@@ -69,8 +69,8 @@ def parse_input():
                               'downstream end of a read.'), action='store_true')
     parser.add_argument('--minimum-trimmed-length',
                         help=('The minimum read length allowed after SL/Poly(A)'
-                              'trimming has been performed. (default=18)'),
-                        default=18)
+                              'trimming has been performed. (default=20)'),
+                        default=20)
     parser.add_argument('--max-dist-from-edge',
                         help=('For unanchored searches, what is the maximum '
                         'distance from the edge of the read for a feature '

@@ -233,7 +233,8 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
             ret = run_command('xz %s' % uncompressed_r1, log_handle)
             ret = run_command('xz %s' % uncompressed_r2, log_handle)
 
-def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, log_handle):
+def map_reads(feature_name, target_genome, target_gff, build_dir, sample_id,
+              read_num, num_threads_tophat, log_handle):
     """
     Maps the filtered reads back to the genome. If the trimmed version of
     the read successfully maps this is indicative of a possible trans-spliced
@@ -243,6 +244,10 @@ def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, 
     ---------
     feature_name: str
         Name of UTR feature.
+    target_genome: str
+        Filepath to genome FASTA to map against.
+    target_gff: str
+        Filepath to the genome annotations GFF file containing known CDS's.
     build_dir: str
         Base diretory to save mapped reads to.
     sample_id: str
@@ -262,35 +267,33 @@ def map_reads(feature_name, build_dir, sample_id, read_num, num_threads_tophat, 
     # input read base directory
     basedir = '%s/%s/fastq' % (build_dir, sample_id)
 
-    # R1 input filepath (including matched sequence)
+    # Feature found in R1
     if read_num == '1':
-        r2_suffix = '2'
-
+        # ex. ../unfiltered/HPGL0251_1_1_polya_trimmed.fastq.gz
         r1_filepath = (
-            '%s/unfiltered/%s_%s_1_%s_trimmed.fastq.gz' %
-            (basedir, sample_id, read_num, feature_name)
+            '%s/unfiltered/%s_1_1_%s_trimmed.fastq.gz' %
+            (basedir, sample_id, feature_name)
         )
 
         # R2 filepath (for PE reads)
-        r2_filepath = r1_filepath.replace('1_%s_untrimmed' % feature_name, '2')
+        r2_filepath = r1_filepath.replace('_1_1' '_1_2')
 
         # If SE, set filepath to empty string
         if not os.path.exists(r2_filepath):
             r2_filepath = ""
-    # R2 input filepath
+    # Feature found in R2 
     else:
-        r1_suffix = '1'
-        r2_filepath = (
-            '%s/unfiltered/%s_%s_2_%s_trimmed.fastq.gz' %
-            (basedir, sample_id, read_num, feature_name)
+        r1_filepath = (
+            '%s/unfiltered/%s_2_1_%s_trimmed.fastq.gz' %
+            (basedir, sample_id, feature_name)
         )
-        r1_filepath = r2_filepath.replace('2_%s_untrimmed' % feature_name, '1')
+        r2_filepath = r1_filepath.replace('_2_1' '_2_2')
 
     # Map reads using Tophat
     tophat_args = '--transcriptome-max-hits 1 --no-mixed --no-discordant'
 
-    ret = run_tophat(output_dir, args.target_genome, log_handle, r1_filepath,
-                     r2_filepath, gff=args.target_gff, max_multihits=1,
+    ret = run_tophat(output_dir, target_genome, log_handle, r1_filepath,
+                     r2_filepath, gff=target_gff, max_multihits=1,
                      num_threads=num_threads_tophat,
                      extra_args=tophat_args)
 
