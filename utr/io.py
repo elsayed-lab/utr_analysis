@@ -177,8 +177,7 @@ def create_build_dirs(args, sample_ids):
         # parameter- and feature-specific directories
         for base_dir in [sl_build_dir, rsl_build_dir,
                          polya_build_dir, polyt_build_dir]:
-            for sub_dir in ['fastq/filtered', 'fastq/unfiltered',
-                            'results', 'log', 'tophat']:
+            for sub_dir in ['fastq', 'results', 'log', 'tophat']:
                 outdir = os.path.join(base_dir, sample_id, sub_dir)
                 if not os.path.exists(outdir):
                     os.makedirs(outdir, mode=0o755)

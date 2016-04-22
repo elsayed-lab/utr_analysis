@@ -269,25 +269,26 @@ def map_reads(feature_name, target_genome, target_gff, build_dir, sample_id,
 
     # Feature found in R1
     if read_num == '1':
-        # ex. ../unfiltered/HPGL0251_1_1_polya_trimmed.fastq.gz
+        # ex. ..fastq/HPGL0251_1_1_polya_trimmed.fastq.gz
         r1_filepath = (
-            '%s/unfiltered/%s_1_1_%s_trimmed.fastq.gz' %
+            '%s/%s_1_1_%s_trimmed.fastq.gz' %
             (basedir, sample_id, feature_name)
         )
 
         # R2 filepath (for PE reads)
-        r2_filepath = r1_filepath.replace('_1_1' '_1_2')
+        r2_filepath = r1_filepath.replace('_1_1_%s_trimmed' % feature_name, '_1_2')
 
         # If SE, set filepath to empty string
         if not os.path.exists(r2_filepath):
             r2_filepath = ""
     # Feature found in R2 
     else:
-        r1_filepath = (
-            '%s/unfiltered/%s_2_1_%s_trimmed.fastq.gz' %
+        r2_filepath = (
+            '%s/%s_2_2_%s_trimmed.fastq.gz' %
             (basedir, sample_id, feature_name)
         )
-        r2_filepath = r1_filepath.replace('_2_1' '_2_2')
+        # 
+        r1_filepath = r2_filepath.replace('_2_2_%s_trimmed' % feature_name, '_2_1')
 
     # Map reads using Tophat
     tophat_args = '--transcriptome-max-hits 1 --no-mixed --no-discordant'

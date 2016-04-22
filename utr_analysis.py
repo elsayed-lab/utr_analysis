@@ -290,7 +290,7 @@ def filter_genomic_reads(input_files, output_files, sample_id, read_num, ext):
 #-----------------------------------------------------------------------------
 @transform(filter_genomic_reads,
            formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
-           '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_sl_trimmed.fastq{EXT[0]}' % build_dirs['sl'],
+           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_sl_trimmed.fastq{EXT[0]}' % build_dirs['sl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
 def find_sl_reads(input_reads, output_file, sample_id, read_num):
@@ -376,7 +376,7 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @transform(filter_genomic_reads,
            formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
-           '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_rsl_trimmed.fastq{EXT[0]}' % build_dirs['rsl'],
+           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_rsl_trimmed.fastq{EXT[0]}' % build_dirs['rsl'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
 def find_rsl_reads(input_reads, output_file, sample_id, read_num):
@@ -453,7 +453,7 @@ def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
 #
 @transform(filter_genomic_reads,
            formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
-           '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_polya_trimmed.fastq{EXT[0]}' % build_dirs['polya'],
+           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_polya_trimmed.fastq{EXT[0]}' % build_dirs['polya'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
 def find_polya_reads(input_reads, output_file, sample_id, read_num):
@@ -515,7 +515,7 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
 #
 @transform(filter_genomic_reads,
            formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
-           '%s/{SAMPLE_ID[0]}/fastq/unfiltered/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_polyt_trimmed.fastq{EXT[0]}' % build_dirs['polyt'],
+           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_polyt_trimmed.fastq{EXT[0]}' % build_dirs['polyt'],
            '{SAMPLE_ID[0]}',
            '{READ_NUM[0]}')
 def find_polyt_reads(input_reads, output_file, sample_id, read_num):

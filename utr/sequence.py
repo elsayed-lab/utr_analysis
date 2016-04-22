@@ -94,7 +94,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     matches = []
 
     # output filepaths
-    output_base = '%s/%s/fastq/unfiltered/%s_%s_%s' % (
+    output_base = '%s/%s/fastq/%s_%s_%s' % (
         build_dir, sample_id, sample_id, read_num, read_num[-1]
     )
     output_untrimmed = "%s_%s_untrimmed.fastq.gz" % (output_base, feature_name)
@@ -121,7 +121,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
     # Start sample log
     log_handle.info("# Scanning %d reads for %s" % (num_reads, feature_name))
-    log_handle.info("# Using Regex patten:\n %s" % feature_regex)
+    log_handle.info("# Using Regex pattern:\n %s" % feature_regex)
 
     # open output string buffer (will write to compressed file later)
     reads_trimmed = cStringIO.StringIO()
