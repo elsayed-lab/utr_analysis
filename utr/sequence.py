@@ -327,7 +327,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
     inside_cds = csv.writer(
         open('%s/inside_cds_%s.csv' % (output_dir, read_num), 'w')
     )
-    inside_cds.writerow(['read_id', 'ch-romosome', 'strand', 'position'])
+    inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
 
     # In addition to saving the coordinates as a GFF file, we will also write a
     # CSV file which contains entries for each read used. This can be useful
@@ -613,7 +613,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         else:
             results[chromosome][gene['id']][acceptor_site]['count'] += 1
             results[chromosome][gene['id']][acceptor_site]['seq_dist'] += seq_dist
-            results[chromosome][gene['id']][acceptor_site]['count'] += len(matched_seq)
+            results[chromosome][gene['id']][acceptor_site]['match_len'] += len(matched_seq)
 
     # record number of good and bad reads
     log_handle.info(
