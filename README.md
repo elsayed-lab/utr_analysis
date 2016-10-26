@@ -17,8 +17,9 @@ flow management.
 - Genome sequence (FASTA)
 - Genome annotation including CDS coordinates (GFF)
 - Spliced leader sequence (for 5'UTR/SL analysis)
-- (**Optional**) Genome sequence for a second species that is not of interest but
-   may be used to filter out reads, e.g. in a mixed transcriptome study (fasta)
+- (**Optional**) Genome sequence and annotations for a second species that is
+  not of interest but may be used to filter out reads, e.g. in a mixed
+  transcriptome study (fasta)
 
 ### Goals
 
@@ -48,6 +49,7 @@ Requirements
 
 - Python 2.7
 - [Samtools](http://www.htslib.org/) (>= 1.3)
+- [Tophat](https://ccb.jhu.edu/software/tophat/index.shtml)
 
 ### Python libraries
 
@@ -162,7 +164,8 @@ align to the human genome
        -s AACTAACGCTATTATTGATACAGTTTCTGTACTATATTG                  \
        -f1 TriTrypDB-27_TcruziCLBrenerEsmeraldo-like_Genome.fasta  \
        -f2 hg38.fasta                                              \
-       -g TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff               \
+       -g1 TrypDB-27_TcruziCLBrenerEsmeraldo-like.gff              \
+       -g2 Homo_sapiens.GRCh38.83.compat.gtf
 
 ### Example 2
 
