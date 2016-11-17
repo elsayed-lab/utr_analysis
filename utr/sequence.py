@@ -382,11 +382,10 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             (read.is_read2 and read_num == '1')):
             continue
 
-        # TESTING 2015/04/13
+        # Should not occur...
         if read.qname in read_ids:
             print("Skipping duplicate read: %s" % read.qname)
             import pdb; pdb.set_trace()
-            #continue
 
         read_ids.append(read.qname)
 
@@ -428,6 +427,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             acceptor_site_side = 'left' if trimmed_side == 'right' else 'right'
 
         # Acceptor site position
+        # Note: csamtools.AlignedRead positions are 0-indexed
         if acceptor_site_side == 'left':
             acceptor_site = read.pos
         else:
@@ -451,7 +451,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
 
             # Grab region just before mapped read
             trimmed_genome_seq = chr_sequences[chromosome][read.pos -
-                trimmed_part_length:read.pos].seq
+                trimmed_part_length:read.pos + 1].seq
 
             matched_genome_seq = trimmed_genome_seq[-match_length:]
 
@@ -463,8 +463,10 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
                                       (read.pos + read.rlen))
 
             # Grab region just after mapped untrimmed read
-            trimmed_genome_seq = chr_sequences[chromosome][read.pos +
-                read.rlen + 1:read.pos + read.rlen + trimmed_part_length + 1].seq
+            start = read.pos + read.rlen
+            end = read.pos + read.rlen + trimmed_part_length
+
+            trimmed_genome_seq = chr_sequences[chromosome][start:end].seq
             matched_genome_seq = trimmed_genome_seq[:match_length]
 
         # For reads mapped to negative strand, take complement
@@ -484,6 +486,9 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         else:
             trimmed_part = str(untrimmed_read.seq[-trimmed_part_length:])
             matched_seq = trimmed_part[:match_length]
+
+        # checking for one-off error when determining genome seq
+        import pdb; pdb.set_trace();
 
         # Check to see that match differs from genome sequence (quick)
         if (matched_seq == matched_genome_seq):

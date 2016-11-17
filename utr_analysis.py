@@ -396,7 +396,7 @@ def find_rsl_reads(input_reads, output_file, sample_id, read_num):
     else:
         # In order to simplify detection of the right-most features in cases
         # where  multiple matches are present in read, we will reverse the 
-        # read and regex and search and then invert results
+        # read and regex and search and then invert the results
         subseqs = [reverse_sl[:x][::-1] for x in
                    range(args.min_sl_length, len(args.spliced_leader) + 1)]
         subseqs.reverse()
@@ -614,6 +614,13 @@ if __name__ == "__main__":
     pipeline_run([combine_sl_results, combine_polya_results],
                  logger=logging.getLogger(''),
                  multiprocess=args.num_threads)
+    # pipeline_run([map_sl_reads, map_rsl_reads, map_polya_reads,
+    #               map_polyt_reads,compute_polya_coordinates,
+    #               compute_polyt_coordinates],
+    #              logger=logging.getLogger(''),
+    #              multiprocess=args.num_threads,
+    #              touch_files_only=True)
+     
     pipeline_printout_graph("utr_analysis_flowchart.png", "png",
                             [combine_sl_results, combine_polya_results],
                             pipeline_name='Trypanosome UTR Analysis Pipeline')
