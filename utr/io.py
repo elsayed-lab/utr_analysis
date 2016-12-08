@@ -378,7 +378,10 @@ def load_annotations(target_gff):
     annotations_fp = open(target_gff)
 
     for entry in GFF.parse(annotations_fp):
-        if len(entry.features) > 0 and entry.features[0].type in ['chromosome', 'contig']:
+        # For TriTrypDB 29 and above, there are no longer chromosome entries
+        # in the GFF files
+        # if len(entry.features) > 0 and entry.features[0].type in ['chromosome', 'contig']:
+        if len(entry.features) > 0:
             chromosomes[entry.id] = entry
 
     # clean up
