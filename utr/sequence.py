@@ -131,6 +131,11 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     # Keep track of matched read IDs
     read_ids = []
 
+    # Keep track of ways in which reads are filtered out
+    num_filtered_no_seq_match = 0
+    num_filtered_too_small = 0
+    num_filtered_far_from_edge = 0
+
     # Find all reads containing the sequence of interest
     if input_file.endswith('.gz'):
         fastq = gzip.open(input_file, 'rb')
@@ -155,6 +160,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         # this just speeds up the search so we don't have to use regex on all
         # reads
         if sequence_filter not in read[SEQUENCE_IDX]:
+            num_filtered_no_seq_match += 1
             continue
 
         # check for match
@@ -175,6 +181,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
                 # move on the next read if no match is found
                 if match is None:
+                    num_filtered_no_seq_match += 1
                     continue
 
                 match_start = match.start()
@@ -201,6 +208,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
 
         # skip reads that are less than the required amount after trimming
         if len(trimmed_read[SEQUENCE_IDX]) < minimum_trimmed_length:
+            num_filtered_too_small += 1
             continue
 
         # length of portion trimmed off
@@ -210,6 +218,7 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
         # for internal matches, skip reads where match is not close enough to
         # the edge of the read
         if (trimmed_part_length - match_length) > max_dist_from_edge:
+            num_filtered_far_from_edge += 1
             continue
 
         # write length
@@ -249,6 +258,15 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
     # log numbers
     log_handle.info("# Found %d reads with possible %s fragment" %
              (len(read_ids), feature_name))
+    log_handle.info(
+        "# Excluded %d reads with no feature matches."
+        % num_filtered_no_seq_match)
+    log_handle.info(
+        "# Excluded %d reads which were too short after trimming."
+        % num_filtered_too_small)
+    log_handle.info(
+        "# Excluded %d reads with matched feature too far from read edge."
+        % num_filtered_far_from_edge)
 
     # Create output directory
     output_dir = os.path.dirname(output_base)
@@ -284,7 +302,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         trimmed_part        sequence of the portion of the read trimmed off
         trimmed_genome_seq  sequence at the genome location corresponding to
                             trimmed portion of the read
-        matched_seq         sequence matched in previous step
+        matched_seq         SL/Poly(A) sequence matched in previous step
         matched_genome_seq  sequence at the genome location corresponding to
                             the matched portion of the read
 
@@ -308,14 +326,20 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
 
     # Get chromosomes/contigs from GFF file
     chromosomes = load_annotations(target_gff)
-
+    
     # Create a dictionary to keep track of the coordinates.
     results = {}
 
     # keep track of how many reads were found in the expected location
     num_good = 0
-    num_no_nearby_genes = 0
-    num_inside_cds = 0
+
+    # Keep track of ways in which reads are filtered out
+    num_filtered_too_small = 0
+    num_filtered_near_chr_edge = 0
+    num_filtered_matches_genome_seq = 0
+    num_filtered_similar_to_genome_seq = 0
+    num_filtered_no_nearby_genes = 0
+    num_filtered_inside_cds = 0
 
     # Create output CSV writer for hits that are not near any genes
     no_nearby_genes = csv.writer(
@@ -372,14 +396,18 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         # drop the @ in front of HWI
         match_lengths[row[0][1:]] = int(row[1])
 
+    # Keep track of reads skipped due to coming from the wrong side of PE
+    num_skipped = 0
+
     # Keep track of matched read IDs
     read_ids = []
 
     # Get coordinate and strand for each read in bam file
-    for read in sam:
+    for i, read in enumerate(sam):
         # Get read where feature sequence was found
         if ((read.is_read1 and read_num == '2') or
             (read.is_read2 and read_num == '1')):
+            num_skipped += 1
             continue
 
         # Should not occur...
@@ -395,10 +423,6 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
 
         # Length of matched SL suffix or number of A's/T's
         untrimmed_read = untrimmed_reads[read.qname][read_num]
-
-        # NOTE: this may be larger than the SL sequence length if unanchored
-        # matches are allowed
-        trimmed_part_length = untrimmed_read.rlen - read.rlen
 
         # get match length (actual portion matched)
         try:
@@ -420,7 +444,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             # was mapped
             actual_strand = '+' if strand is '-' else '-' 
 
-        # Side of acceptor site after mapping
+        # Side of acceptor site after mapping, relative to rest of trimmed read
         if strand == '+':
             acceptor_site_side = trimmed_side
         else:
@@ -436,46 +460,30 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         # If read is mapped too close to end of chromosome, skip it
         # left end
         if read.pos < (min_feature_length - 1):
+            num_filtered_near_chr_edge += 1
             continue
         # right end
         if ((read.pos + read.rlen) > (len(chromosomes[chromosome]) - 
              min_feature_length)):
+            num_filtered_near_chr_edge += 1
             continue
-        
-        # Genome sequence just upstream of mapped location
-        if acceptor_site_side == 'left': 
-            # Shorten read if left end of read was mapped near end of
-            # chromosome
-            trimmed_part_length = min(min(trimmed_part_length, read.pos),
-                                      len(chr_sequences[chromosome]) - read.pos)
 
-            # Grab region just before mapped read
-            trimmed_genome_seq = chr_sequences[chromosome][read.pos -
-                trimmed_part_length:read.pos + 1].seq
+        # determine the length of the trimmed portion of read
+        trimmed_part_length = get_trimmed_part_len(acceptor_site_side,
+                                                   untrimmed_read.rlen,
+                                                   read.rlen, read.pos, 
+                                                   len(chr_sequences[chromosome]))
 
-            matched_genome_seq = trimmed_genome_seq[-match_length:]
+        # get the genomic sequences corresponding to the trimmed portion of
+        # the read and the matched portion of the read
+        trimmed_genome_seq = get_trimmed_genome_seq(acceptor_site_side,
+                                                    read.pos, read.rlen, 
+                                                    trimmed_part_length,
+                                                    chr_sequences[chromosome])
 
-        # Genome sequence just downstream of mapped location
-        else:
-            # Shorten if right end of read was mapped near end of chromosome
-            trimmed_part_length = min(min(trimmed_part_length, read.pos),
-                                      len(chr_sequences[chromosome]) - 
-                                      (read.pos + read.rlen))
-
-            # Grab region just after mapped untrimmed read
-            start = read.pos + read.rlen
-            end = read.pos + read.rlen + trimmed_part_length
-
-            trimmed_genome_seq = chr_sequences[chromosome][start:end].seq
-            matched_genome_seq = trimmed_genome_seq[:match_length]
-
-        # For reads mapped to negative strand, take complement
-        if strand == '+':
-            trimmed_genome_seq = str(trimmed_genome_seq)
-            matched_genome_seq = str(matched_genome_seq)
-        else:
-            trimmed_genome_seq = str(trimmed_genome_seq.reverse_complement())
-            matched_genome_seq = str(matched_genome_seq.reverse_complement())
+        matched_genome_seq = get_matched_genome_seq(acceptor_site_side,
+                                                    trimmed_genome_seq,
+                                                    match_length)
 
         # Get sequence of the trimmed portion of the read and the sequence that
         # matched feature of interest
@@ -486,9 +494,6 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         else:
             trimmed_part = str(untrimmed_read.seq[-trimmed_part_length:])
             matched_seq = trimmed_part[:match_length]
-
-        # checking for one-off error when determining genome seq
-        import pdb; pdb.set_trace();
 
         # Check to see that match differs from genome sequence (quick)
         if (matched_seq == matched_genome_seq):
@@ -540,10 +545,12 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         #
         # Check to see if feature is still sufficiently long;
         if len(matched_seq) < min_feature_length:
+            num_filtered_too_small += 1
             continue
 
         # Check to see that match differs from genome sequence (quick)
         if (matched_seq == matched_genome_seq):
+            num_filtered_matches_genome_seq += 1
             continue
 
         try:
@@ -552,6 +559,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             # sequence (slower)
             seq_dist = distance.hamming(matched_seq, matched_genome_seq)
             if seq_dist < minimum_differences:
+                num_filtered_similar_to_genome_seq += 1
                 continue
         except:
             # occurs when sl is smaller than genome/trimed_portion
@@ -566,7 +574,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         # a known CDS: if it does, save to a separate file to look at later
         if is_inside_cds(chromosomes[chromosome], acceptor_site, window_size):
             inside_cds.writerow([read.qname, chromosome, strand, acceptor_site])
-            num_inside_cds = num_inside_cds + 1
+            num_filtered_inside_cds += 1
             continue
 
         # Find nearest gene
@@ -577,7 +585,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         if gene is None:
             no_nearby_genes.writerow(
                 [read.qname, chromosome, strand, acceptor_site])
-            num_no_nearby_genes = num_no_nearby_genes + 1
+            num_filtered_no_nearby_genes += 1
             continue
 
         num_good = num_good + 1
@@ -620,16 +628,39 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             results[chromosome][gene['id']][acceptor_site]['seq_dist'] += seq_dist
             results[chromosome][gene['id']][acceptor_site]['match_len'] += len(matched_seq)
 
+    # total number of reads checked
+    total_reads = float(i) - num_skipped
+
+    # DEBUGGING (check neg2, neg1, etc.)
+    # if feature_name in ['sl', 'rsl']:
+    #     import pdb; pdb.set_trace()
+
     # record number of good and bad reads
+    log_handle.info("#########################################################")
+    log_handle.info("#")
+    log_handle.info("# Scanned a total of %d reads for %s fragments:" %
+                    (i, feature_name))
+    log_handle.info("#")
+    log_handle.info("#    - Matches: %d (%0.2f%%)" % (num_good, (num_good / total_reads) * 100))
+    log_handle.info("#    - Excluded (too short): %d (%0.2f%%)" % 
+                    (num_filtered_too_small, (num_filtered_too_small / total_reads) * 100))
     log_handle.info(
-        "# Found %d reads with predicted acceptor site at expected location"
-        % num_good)
+        "#    - Excluded (near chromosome boundaries): %d (%0.2f%%)" % 
+        (num_filtered_near_chr_edge, (num_filtered_near_chr_edge / total_reads) * 100))
     log_handle.info(
-        "# Found %d reads with predicted acceptor site inside a known CDS"
-        % num_inside_cds)
+        "#    - Excluded (matches genome sequence): %d (%0.2f%%)" %
+        (num_filtered_matches_genome_seq, (num_filtered_matches_genome_seq / total_reads) * 100))
     log_handle.info(
-        "# Found %d reads with predicted acceptor site not proximal to any CDS"
-        % num_no_nearby_genes)
+        "#    - Excluded (simmilar to genome sequence): %d (%0.2f%%)" % 
+        (num_filtered_similar_to_genome_seq, (num_filtered_similar_to_genome_seq / total_reads) * 100))
+    log_handle.info(
+        "#    - Excluded (inside known CDS): %d (%0.2f%%)"  % 
+        (num_filtered_inside_cds, (num_filtered_inside_cds / total_reads) * 100))
+    log_handle.info(
+        "#    - Excluded (to far from known CDS's): %d (%0.2f%%)" % 
+        (num_filtered_no_nearby_genes, (num_filtered_no_nearby_genes / total_reads) * 100))
+    log_handle.info("#")
+    log_handle.info("#########################################################")
 
     # Output coordinates as a GFF file
     output_filepath = '%s/%s_coordinates_%s.gff' % (
@@ -637,6 +668,85 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
     )
 
     output_coordinates(results, feature_name, output_filepath, target_gff)
+
+def get_trimmed_part_len(acceptor_site_side, untrimmed_read_len,
+                         read_len, read_pos, chr_len):
+    """
+    Returns the length of the region of the read that was trimmed off.
+
+    In most cases, this is simply the difference between the untrimmed read
+    length and and trimmed read length.
+
+    Near chromosome boundaries, however, the trimmed part length may need to be
+    truncated.
+
+    NOTE: this may be larger than the SL sequence length if unanchored
+    matches are allowed
+    """
+    trimmed_part_length = untrimmed_read_len - read_len
+
+    if acceptor_site_side == 'left': 
+        # Shorten read if left end of read was mapped near end of
+        # chromosome
+        trimmed_part_length = min(min(trimmed_part_length, read_pos),
+                                    chr_len - read_pos)
+        
+    # Genome sequence just downstream of mapped location
+    else:
+        # Shorten if right end of read was mapped near end of chromosome
+        trimmed_part_length = min(min(trimmed_part_length, read_pos),
+                                    chr_len - (read_pos + read_len))
+
+    return trimmed_part_length
+
+
+def get_trimmed_genome_seq(acceptor_site_side, read_pos, read_len,
+                            trimmed_part_length, chr_seq):
+    """Determines the genomic sequence corresponding to the portion of
+    the read which was trimmed off."""
+    # Genome sequence just upstream of mapped location
+    if acceptor_site_side == 'left': 
+        # Grab region just before mapped read
+        start = read_pos - trimmed_part_length
+        end = read_pos
+        # end = read_pos + 1
+
+        trimmed_genome_seq = chr_seq[start:end].seq
+    # Genome sequence just downstream of mapped location
+    else:
+        # Grab region just after mapped untrimmed read
+        start = read_pos + read_len
+        end = read_pos + read_len + trimmed_part_length
+
+        # TESTING 2016/12/02
+        # start = read_pos + read_len - 1
+        # end = read_pos + read_len + trimmed_part_length - 1
+        trimmed_genome_seq = chr_seq[start:end].seq
+
+    # For reads mapped to negative strand, take complement
+    if strand == '+':
+        trimmed_genome_seq = str(trimmed_genome_seq)
+    else:
+        trimmed_genome_seq = str(trimmed_genome_seq.reverse_complement())
+
+    return trimmed_genome_seq
+
+def get_matched_genome_seq(acceptor_site_side, trimmed_genome_seq,
+                           match_length):
+    # Genome sequence adjacent to mapped location
+    if acceptor_site_side == 'left': 
+        matched_genome_seq = trimmed_genome_seq[-match_length:]
+    else:
+        matched_genome_seq = trimmed_genome_seq[:match_length]
+
+    # For reads mapped to negative strand, take complement
+    if strand == '+':
+        matched_genome_seq = str(matched_genome_seq)
+    else:
+        matched_genome_seq = str(matched_genome_seq.reverse_complement())
+
+    return matched_genome_seq
+
 
 def is_inside_cds(chromosome, location, window_size):
     """
