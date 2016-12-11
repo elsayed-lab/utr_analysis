@@ -179,7 +179,8 @@ def find_sequence(input_file, feature_name, sequence_filter, feature_regex,
             else:
                 match = re.search(read_regex, read[SEQUENCE_IDX])
 
-                # move on the next read if no match is found
+                # for anchored reads, its possible that a read passes the
+                # quick filter check but the regex does not match
                 if match is None:
                     num_filtered_no_seq_match += 1
                     continue
@@ -341,6 +342,17 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
     num_filtered_no_nearby_genes = 0
     num_filtered_inside_cds = 0
 
+    # DEBUGGING: checking for one-off error when determining genome seq
+    neg3 = 0
+    neg2 = 0
+    neg1 = 0
+    zero = 0
+    pos1 = 0
+    pos2 = 0
+    pos3 = 0
+    pos_strand = 0
+    neg_strand = 0
+
     # Create output CSV writer for hits that are not near any genes
     no_nearby_genes = csv.writer(
         open('%s/no_nearby_genes_%s.csv' % (output_dir, read_num), 'w')
@@ -360,7 +372,9 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         open('%s/matched_reads_%s.csv' % (output_dir, read_num), 'w')
     )
     sample_csv_writer.writerow(['read_id', 'gene_id', 'chromosome',
-        'gene_strand', 'read_strand', 'trimmed_start', 'trimmed_stop',
+        'gene_strand', 'read_strand', 
+        'trimmed_side', 'acceptor_site_side', 'debug_match_loc',
+        'trimmed_start', 'trimmed_stop',
         'untrimmed_seq', 'trimmed_part', 'trimmed_genome_seq', 'matched_seq',
         'matched_genome_seq', 'acceptor_site'])
 
@@ -410,25 +424,22 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             num_skipped += 1
             continue
 
-        # Should not occur...
-        if read.qname in read_ids:
-            print("Skipping duplicate read: %s" % read.qname)
-            import pdb; pdb.set_trace()
-
         read_ids.append(read.qname)
 
         # Chromosome and strand where the read was mapped
         chromosome = sam.getrname(read.tid)
         strand = "-" if read.is_reverse else "+"
 
+        if strand == '+':
+            pos_strand = pos_strand + 1
+        else:
+            neg_strand = neg_strand + 1
+
         # Length of matched SL suffix or number of A's/T's
         untrimmed_read = untrimmed_reads[read.qname][read_num]
 
         # get match length (actual portion matched)
-        try:
-            match_length = match_lengths[read.qname]
-        except:
-            import pdb; pdb.set_trace()
+        match_length = match_lengths[read.qname]
 
         # Side of original read trimmed
         if feature_name in ['sl', 'polyt']:
@@ -444,7 +455,8 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             # was mapped
             actual_strand = '+' if strand is '-' else '-' 
 
-        # Side of acceptor site after mapping, relative to rest of trimmed read
+        # if trimmed read mapped to reverse strand, then polya/acceptor site
+        # will be on the opposite side of where it was originally located
         if strand == '+':
             acceptor_site_side = trimmed_side
         else:
@@ -479,11 +491,12 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         trimmed_genome_seq = get_trimmed_genome_seq(acceptor_site_side,
                                                     read.pos, read.rlen, 
                                                     trimmed_part_length,
-                                                    chr_sequences[chromosome])
+                                                    chr_sequences[chromosome],
+                                                    strand)
 
         matched_genome_seq = get_matched_genome_seq(acceptor_site_side,
                                                     trimmed_genome_seq,
-                                                    match_length)
+                                                    match_length, strand)
 
         # Get sequence of the trimmed portion of the read and the sequence that
         # matched feature of interest
@@ -495,9 +508,158 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             trimmed_part = str(untrimmed_read.seq[-trimmed_part_length:])
             matched_seq = trimmed_part[:match_length]
 
+        # TEMP DEBUGGING
+        if acceptor_site_side == 'left': 
+            start = read.pos - trimmed_part_length
+            end = read.pos
+        else:
+            start = read.pos + read.rlen
+            end = read.pos + read.rlen + trimmed_part_length
+
+        debug_match_loc = 'none'
+
+        if feature_name == 'rsl':
+            if strand == '+':
+                if str(chr_sequences[chromosome][start:end].seq[:match_length]).startswith('CAA'):
+                    zero += 1
+                    debug_match_loc = 'expected'
+                elif str(chr_sequences[chromosome][start-3:end-3].seq[:match_length]).startswith('CAA'):
+                    neg3 += 1
+                    debug_match_loc = 'neg3'
+                elif str(chr_sequences[chromosome][start-2:end-2].seq[:match_length]).startswith('CAA'):
+                    neg2 += 1
+                    debug_match_loc = 'neg2'
+                elif str(chr_sequences[chromosome][start-1:end-1].seq[:match_length]).startswith('CAA'):
+                    neg1 += 1
+                    debug_match_loc = 'neg1'
+                elif str(chr_sequences[chromosome][start+1:end+1].seq[:match_length]).startswith('CAA'):
+                    pos1 += 1
+                    debug_match_loc = 'pos1'
+                elif str(chr_sequences[chromosome][start+2:end+2].seq[:match_length]).startswith('CAA'):
+                    pos2 += 1
+                    debug_match_loc = 'pos2'
+                elif str(chr_sequences[chromosome][start+3:end+3].seq[:match_length]).startswith('CAA'):
+                    pos3 += 1
+                    debug_match_loc = 'pos3'
+            else:
+                if str(chr_sequences[chromosome][start:end].seq[:match_length].reverse_complement()).startswith('CAA'):
+                    debug_match_loc = 'expected'
+                    zero += 1
+                elif str(chr_sequences[chromosome][start-3:end-3].seq[:match_length].reverse_complement()).startswith('CAA'):
+                    debug_match_loc = 'neg3'
+                    neg3 += 1
+                elif str(chr_sequences[chromosome][start-2:end-2].seq[:match_length].reverse_complement()).startswith('CAA'):
+                    debug_match_loc = 'neg2'
+                    neg2 += 1
+                elif str(chr_sequences[chromosome][start-1:end-1].seq[:match_length].reverse_complement()).startswith('CAA'):
+                    debug_match_loc = 'neg1'
+                    neg1 += 1
+                elif str(chr_sequences[chromosome][start+1:end+1].seq[:match_length].reverse_complement()).startswith('CAA'):
+                    pos1 += 1
+                    debug_match_loc = 'pos1'
+                elif str(chr_sequences[chromosome][start+2:end+2].seq[:match_length].reverse_complement()).startswith('CAA'):
+                    debug_match_loc = 'pos2'
+                    pos2 += 1
+                elif str(chr_sequences[chromosome][start+3:end+3].seq[:match_length].reverse_complement()).startswith('CAA'):
+                    debug_match_loc = 'pos3'
+                    pos3 += 1
+        elif feature_name == 'sl':
+            if strand == '+':
+                if str(chr_sequences[chromosome][start:end].seq[:match_length]).endswith('TTG'):
+                    zero += 1
+                    debug_match_loc = 'expected'
+                elif str(chr_sequences[chromosome][start-3:end-3].seq[:match_length]).endswith('TTG'):
+                    neg3 += 1
+                    debug_match_loc = 'neg3'
+                elif str(chr_sequences[chromosome][start-2:end-2].seq[:match_length]).endswith('TTG'):
+                    neg2 += 1
+                    debug_match_loc = 'neg2'
+                elif str(chr_sequences[chromosome][start-1:end-1].seq[:match_length]).endswith('TTG'):
+                    neg1 += 1
+                    debug_match_loc = 'neg1'
+                elif str(chr_sequences[chromosome][start+1:end+1].seq[:match_length]).endswith('TTG'):
+                    debug_match_loc = 'pos1'
+                    pos1 += 1
+                elif str(chr_sequences[chromosome][start+2:end+2].seq[:match_length]).endswith('TTG'):
+                    debug_match_loc = 'pos2'
+                    pos2 += 1
+                elif str(chr_sequences[chromosome][start+3:end+3].seq[:match_length]).endswith('TTG'):
+                    pos3 += 1
+                    debug_match_loc = 'pos3'
+            # sl, neg
+            else:
+                if str(chr_sequences[chromosome][start:end].seq[:match_length].reverse_complement()).endswith('TTG'):
+                    debug_match_loc = 'expected'
+                    zero += 1
+                elif str(chr_sequences[chromosome][start-3:end-3].seq[:match_length].reverse_complement()).endswith('TTG'):
+                    debug_match_loc = 'neg3'
+                    neg3 += 1
+                elif str(chr_sequences[chromosome][start-2:end-2].seq[:match_length].reverse_complement()).endswith('TTG'):
+                    debug_match_loc = 'neg2'
+                    neg2 += 1
+                elif str(chr_sequences[chromosome][start-1:end-1].seq[:match_length].reverse_complement()).endswith('TTG'):
+                    debug_match_loc = 'neg1'
+                    neg1 += 1
+                elif str(chr_sequences[chromosome][start+1:end+1].seq[:match_length].reverse_complement()).endswith('TTG'):
+                    debug_match_loc = 'pos1'
+                    pos1 += 1
+                elif str(chr_sequences[chromosome][start+2:end+2].seq[:match_length].reverse_complement()).endswith('TTG'):
+                    debug_match_loc = 'pos2'
+                    pos2 += 1
+                elif str(chr_sequences[chromosome][start+3:end+3].seq[:match_length].reverse_complement()).endswith('TTG'):
+                    debug_match_loc = 'pos3'
+                    pos3 += 1
+        elif (feature_name == 'polya' and strand == '+') or (feature_name == 'polyt' and strand == '-'):
+            if str(chr_sequences[chromosome][start:end].seq[:match_length]).endswith('AAA'):
+                zero += 1
+                debug_match_loc = 'expected'
+            elif str(chr_sequences[chromosome][start-3:end-3].seq[:match_length]).endswith('AAA'):
+                neg3 += 1
+                debug_match_loc = 'neg3'
+            elif str(chr_sequences[chromosome][start-2:end-2].seq[:match_length]).endswith('AAA'):
+                neg2 += 1
+                debug_match_loc = 'neg2'
+            elif str(chr_sequences[chromosome][start-1:end-1].seq[:match_length]).endswith('AAA'):
+                neg1 += 1
+                debug_match_loc = 'neg1'
+            elif str(chr_sequences[chromosome][start+1:end+1].seq[:match_length]).endswith('AAA'):
+                debug_match_loc = 'pos1'
+                pos1 += 1
+            elif str(chr_sequences[chromosome][start+2:end+2].seq[:match_length]).endswith('AAA'):
+                debug_match_loc = 'pos2'
+                pos2 += 1
+            elif str(chr_sequences[chromosome][start+3:end+3].seq[:match_length]).endswith('AAA'):
+                pos3 += 1
+                debug_match_loc = 'pos3'
+        else:
+            if str(chr_sequences[chromosome][start:end].seq[:match_length]).endswith('TTT'):
+                zero += 1
+                debug_match_loc = 'expected'
+            elif str(chr_sequences[chromosome][start-3:end-3].seq[:match_length]).endswith('TTT'):
+                neg3 += 1
+                debug_match_loc = 'neg3'
+            elif str(chr_sequences[chromosome][start-2:end-2].seq[:match_length]).endswith('TTT'):
+                neg2 += 1
+                debug_match_loc = 'neg2'
+            elif str(chr_sequences[chromosome][start-1:end-1].seq[:match_length]).endswith('TTT'):
+                neg1 += 1
+                debug_match_loc = 'neg1'
+            elif str(chr_sequences[chromosome][start+1:end+1].seq[:match_length]).endswith('TTT'):
+                debug_match_loc = 'pos1'
+                pos1 += 1
+            elif str(chr_sequences[chromosome][start+2:end+2].seq[:match_length]).endswith('TTT'):
+                debug_match_loc = 'pos2'
+                pos2 += 1
+            elif str(chr_sequences[chromosome][start+3:end+3].seq[:match_length]).endswith('TTT'):
+                pos3 += 1
+                debug_match_loc = 'pos3'
+
         # Check to see that match differs from genome sequence (quick)
         if (matched_seq == matched_genome_seq):
+            num_filtered_matches_genome_seq += 1
             continue
+
+        import pdb; pdb.set_trace();
 
         # Note: for real acceptor sites, actual_strand = gene_strand
 
@@ -548,7 +710,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             num_filtered_too_small += 1
             continue
 
-        # Check to see that match differs from genome sequence (quick)
+        # Check to see that match (still) differs from genome sequence
         if (matched_seq == matched_genome_seq):
             num_filtered_matches_genome_seq += 1
             continue
@@ -564,7 +726,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         except:
             # occurs when sl is smaller than genome/trimed_portion
             print("Trimmed: " + trimmed_part)
-            print("Trimmed (genome): " + trimmed_genome_seq)
+            print("Trimmed (genome): " + str(trimmed_genome_seq))
             print("Matched: " + matched_seq)
             print("Matched (genome): " + matched_genome_seq)
             import pdb; pdb.set_trace()
@@ -599,8 +761,10 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         # Add entry to sample output csv
         sample_csv_writer.writerow([
             read.qname, gene['id'], chromosome, actual_strand, strand,
+            trimmed_side, acceptor_site_side, debug_match_loc,
             read.pos, read.pos + read.rlen, untrimmed_read.seq, trimmed_part,
-            trimmed_genome_seq, matched_seq, matched_genome_seq, acceptor_site
+            str(trimmed_genome_seq), matched_seq, matched_genome_seq, 
+            acceptor_site
         ])
 
         #
@@ -660,6 +824,19 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
         "#    - Excluded (to far from known CDS's): %d (%0.2f%%)" % 
         (num_filtered_no_nearby_genes, (num_filtered_no_nearby_genes / total_reads) * 100))
     log_handle.info("#")
+    log_handle.info("# DEBUGGING:")
+    log_handle.info("#")
+    log_handle.info("#    - neg3: %d" % neg3)
+    log_handle.info("#    - neg2: %d" % neg2)
+    log_handle.info("#    - neg1: %d" % neg1)
+    log_handle.info("#    - zero: %d" % zero)
+    log_handle.info("#    - pos1: %d" % pos1)
+    log_handle.info("#    - pos2: %d" % pos2)
+    log_handle.info("#    - pos3: %d" % pos3)
+    log_handle.info("#")
+    log_handle.info("#    - + strand: %d" % pos_strand)
+    log_handle.info("#    - - strand: %d" % neg_strand)
+    log_handle.info("#")
     log_handle.info("#########################################################")
 
     # Output coordinates as a GFF file
@@ -701,7 +878,7 @@ def get_trimmed_part_len(acceptor_site_side, untrimmed_read_len,
 
 
 def get_trimmed_genome_seq(acceptor_site_side, read_pos, read_len,
-                            trimmed_part_length, chr_seq):
+                            trimmed_part_length, chr_seq, strand):
     """Determines the genomic sequence corresponding to the portion of
     the read which was trimmed off."""
     # Genome sequence just upstream of mapped location
@@ -725,14 +902,14 @@ def get_trimmed_genome_seq(acceptor_site_side, read_pos, read_len,
 
     # For reads mapped to negative strand, take complement
     if strand == '+':
-        trimmed_genome_seq = str(trimmed_genome_seq)
+        trimmed_genome_seq = trimmed_genome_seq
     else:
-        trimmed_genome_seq = str(trimmed_genome_seq.reverse_complement())
+        trimmed_genome_seq = trimmed_genome_seq.reverse_complement()
 
     return trimmed_genome_seq
 
 def get_matched_genome_seq(acceptor_site_side, trimmed_genome_seq,
-                           match_length):
+                           match_length, strand):
     # Genome sequence adjacent to mapped location
     if acceptor_site_side == 'left': 
         matched_genome_seq = trimmed_genome_seq[-match_length:]

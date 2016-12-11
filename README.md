@@ -25,13 +25,11 @@ flow management.
 
 #### Spliced leader analysis
 
-Generate a table containing the location of primary and alternative splice
-acceptor sites for each gene (and condition/sample) along with the usage
-frequency for acceptor sites.
+Generate a table containing the location of primary and alternative
+trans-splicing acceptor sites for each gene (and condition/sample) along with
+the usage frequency for acceptor sites.
 
-#### Poly-adenylation analysis
-
-### Basic process
+The basic steps followed are:
 
 1. Given SL sequence, find all paired reads containing >= n bases of the SL
    sequence (current default n=10).
@@ -41,6 +39,16 @@ frequency for acceptor sites.
    fragments further upstream resulting in valid internal SL sequences.)
 3. Remove SL portion of sequence and map back to original genome -- site of
    mapping indicates location of splice acceptor site.
+
+#### Polyadenylation site analysis
+
+Similarly, this pipeline attempts to detect reads containing a portion of a
+Poly(A) tail and use this information to determine corresponding
+polyadenylation sites in the genome.
+
+The process used here mirrors that applied for trans-splicing acceptor site
+detection, except that instead of using a spliced leader sequence, reads are
+search for long strings of adenines (or thymines).
 
 Requirements
 ------------

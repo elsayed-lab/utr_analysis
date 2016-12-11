@@ -222,6 +222,9 @@ def filter_host_reads(input_reads, output_reads, sample_id, ext):
     fastq_dir = os.path.join(build_dirs['shared'], sample_id, 'fastq')
 
     # output fastq filepaths
+    if ext is None:
+        ext = ''
+
     output_fastq = os.path.join(
         fastq_dir, "%s_host_reads_removed.fastq%s" % (sample_id, ext))
 
@@ -261,6 +264,8 @@ def filter_genomic_reads(input_files, output_files, sample_id, read_num, ext):
     output_fastq_dir = os.path.join(build_dirs['shared'], sample_id, 'fastq')
 
     # output fastq filepaths
+    if ext is None:
+        ext = ''
     output_fastq = os.path.join(
         output_fastq_dir, "%s_genomic_reads_removed.fastq%s" % (sample_id, ext))
 
