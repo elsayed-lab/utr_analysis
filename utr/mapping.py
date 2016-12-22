@@ -234,7 +234,7 @@ def filter_mapped_reads(r1, r2, genome, tophat_dir, output_fastq, log_handle,
             ret = run_command('xz %s' % uncompressed_r2, log_handle)
 
 def map_reads(feature_name, target_genome, target_gff, build_dir, sample_id,
-              read_num, num_threads_tophat, log_handle):
+              read_num, ext, num_threads_tophat, log_handle):
     """
     Maps the filtered reads back to the genome. If the trimmed version of
     the read successfully maps this is indicative of a possible trans-spliced
@@ -254,6 +254,8 @@ def map_reads(feature_name, target_genome, target_gff, build_dir, sample_id,
         Name of sample currently processing.
     read_num: str
         Read number currently being processed.
+    ext: str
+        Filename suffix corresponding to compression type (gz|xz)
     num_threads_tophat: int
         Number of threads to use when running Tophat.
     log_handle: logging.Handle
@@ -271,8 +273,8 @@ def map_reads(feature_name, target_genome, target_gff, build_dir, sample_id,
     if read_num == '1':
         # ex. ..fastq/HPGL0251_1_1_polya_trimmed.fastq.gz
         r1_filepath = (
-            '%s/%s_1_1_%s_trimmed.fastq.gz' %
-            (basedir, sample_id, feature_name)
+            '%s/%s_1_1_%s_trimmed.fastq%s' %
+            (basedir, sample_id, feature_name, ext)
         )
 
         # R2 filepath (for PE reads)
@@ -284,8 +286,8 @@ def map_reads(feature_name, target_genome, target_gff, build_dir, sample_id,
     # Feature found in R2 
     else:
         r2_filepath = (
-            '%s/%s_2_2_%s_trimmed.fastq.gz' %
-            (basedir, sample_id, feature_name)
+            '%s/%s_2_2_%s_trimmed.fastq%s' %
+            (basedir, sample_id, feature_name, ext)
         )
         # 
         r1_filepath = r2_filepath.replace('_2_2_%s_trimmed' % feature_name, '_2_1')

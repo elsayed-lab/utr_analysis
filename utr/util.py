@@ -2,7 +2,6 @@
 Helper function:
 
     - run_command
-    - gzip_str
     - get_next_file_name
     - setup_loggers
     - num_lines
@@ -12,6 +11,7 @@ import logging
 import subprocess
 import glob
 import gzip
+import backports.lzma as lzma
 import re
 import sys
 import os
@@ -38,21 +38,19 @@ def run_command(cmd, log_handle, wait=True):
 
     return process.returncode
 
-
-def gzip_str(filepath, strbuffer, chunk_size=65536):
-    """Takes a StringIO buffer and writes the output to a gzip-compressed
+def compress_str(filepath, strbuffer, chunk_size=65536):
+    """Takes a StringIO buffer and writes the output to a gzip- or xz-compressed
     file."""
     # go to beginning of string buffer
     strbuffer.seek(0)
 
     # output path
     if filepath.endswith('.gz'):
-        outfile = filepath
-    else:
-        outfile = filepath + '.gz'
-
-    # write contents to a gzip-compressed file
-    fp = gzip.open(outfile, 'wb')
+        # gzip compression
+        fp = gzip.open(filepath, 'wb')
+    elif filepath.endswith('.xz'):
+        # xz compression
+        fp = lzma.open(filepath, 'wb')
 
     # to avoid overflow errors, we will read from the stream in chunks
     contents = strbuffer.read(chunk_size)
@@ -117,18 +115,14 @@ def setup_loggers(root_dir, build_dirs, sample_ids):
     for sample_id in sample_ids:
         loggers[sample_id] = {}
 
-        for analysis in ['sl', 'rsl', 'polya', 'polyt']:
+        for analysis in ['sl', 'polya']:
             loggers[sample_id][analysis] = {}
 
             for read_num in ['1', '2']:
                 if analysis == 'sl':
                     bdir = build_dirs['sl']
-                elif analysis == 'rsl':
-                    bdir = build_dirs['rsl']
-                elif analysis == 'polya':
-                    bdir = build_dirs['polya']
                 else:
-                    bdir = build_dirs['polyt']
+                    bdir = build_dirs['polya']
 
                 sample_log_name = get_next_file_name(
                     os.path.join(bdir, sample_id, 'log', '%s_%s_%s.log' % (

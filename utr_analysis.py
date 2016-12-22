@@ -338,15 +338,16 @@ def find_sl_reads(input_reads, output_file, sample_id, read_num):
 # the location of the mapped trimmed read is where the addition took place.
 #-----------------------------------------------------------------------------
 @transform(find_sl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_sl_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_sl_trimmed.fastq(?P<EXT>\.[xg]z)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['sl'],
            '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def map_sl_reads(input_file, output_file, sample_id, read_num):
+           '{READ_NUM[0]}',
+           '{EXT[0]}')
+def map_sl_reads(input_file, output_file, sample_id, read_num, ext):
     """Maps the filtered spliced-leader containing reads back to the genome"""
     log_handle = loggers[sample_id]['sl'][read_num]
-    map_reads('sl', args.target_genome, args.target_gff, build_dirs['sl'], sample_id, read_num, 
-              args.num_threads_tophat, log_handle)
+    map_reads('sl', args.target_genome, args.target_gff, build_dirs['sl'],
+              sample_id, read_num, ext, args.num_threads_tophat, log_handle)
 
 #-----------------------------------------------------------------------------
 # Step 5: Compute UTR coordinates
@@ -368,83 +369,6 @@ def compute_sl_coordinates(input_file, output_file, sample_id, read_num):
     log_handle = loggers[sample_id]['sl'][read_num]
     compute_coordinates(args.target_genome, args.target_gff, 'sl',
                         build_dirs['sl'], build_dirs['shared'], sample_id,
-                        read_num, args.min_sl_length, args.minimum_differences,
-                        args.window_size, log_handle)
-    logging.info("# Finished!")    
-
-#-----------------------------------------------------------------------------
-# Reverse SL analysis
-#-----------------------------------------------------------------------------
-
-#
-# Reverse SL Step 1
-#
-@transform(filter_genomic_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
-           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_rsl_trimmed.fastq{EXT[0]}' % build_dirs['rsl'],
-           '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def find_rsl_reads(input_reads, output_file, sample_id, read_num):
-    """Matches reads with possible Poly(A) tail fragment"""
-    # Create a reversed version of the SL sequence
-    reverse_sl = str(Seq.Seq(args.spliced_leader).reverse_complement())
-
-    # First-stage filter string
-    rsl_filter = reverse_sl[:args.min_sl_length]
-
-    # Determine strings to match in reads
-    if args.exclude_internal_sl_matches:
-        subseqs = [reverse_sl[:x] + '$' for x in
-                  range(args.min_sl_length, len(args.spliced_leader) + 1)]
-        subseqs.reverse()
-        rsl_regex = '|'.join(subseqs)
-    else:
-        # In order to simplify detection of the right-most features in cases
-        # where  multiple matches are present in read, we will reverse the 
-        # read and regex and search and then invert the results
-        subseqs = [reverse_sl[:x][::-1] for x in
-                   range(args.min_sl_length, len(args.spliced_leader) + 1)]
-        subseqs.reverse()
-        rsl_regex = '|'.join(subseqs)
-
-    logging.info("# find_rsl_reads (%s %s)" % (sample_id, read_num))
-
-    log_handle = loggers[sample_id]['rsl'][read_num]
-
-    find_sequence(input_reads, 'rsl', rsl_filter, rsl_regex,
-                  build_dirs['rsl'], sample_id, read_num, 
-                  args.minimum_trimmed_length, args.max_dist_from_edge, 
-                  log_handle,
-                  trimmed_side='right', reverse=True)
-
-#
-# RSL Step 2
-#
-@transform(find_rsl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_rsl_trimmed.fastq(?P<EXT>\.gz)?'),
-           '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['rsl'],
-           '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def map_rsl_reads(input_file, output_file, sample_id, read_num):
-    """Maps the filtered poly-adenylated reads back to the genome"""
-    log_handle = loggers[sample_id]['rsl'][read_num]
-    map_reads('rsl', args.target_genome, args.target_gff, build_dirs['rsl'], sample_id, read_num,
-              args.num_threads_tophat, log_handle)
-
-#
-# RSL Step 3
-#
-@transform(map_rsl_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/R?(?P<READ_NUM>[12])_filtered_trimmed/accepted_hits.bam'),
-           '%s/{SAMPLE_ID[0]}/results/rsl_coordinates_{READ_NUM[0]}.gff' % build_dirs['rsl'],
-           '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def compute_rsl_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info("# Computing coordinates for mapped trans-splicing events "
-                 "(%s, reverse)" % sample_id)
-    log_handle = loggers[sample_id]['rsl'][read_num]
-    compute_coordinates(args.target_genome, args.target_gff, 'rsl',
-                        build_dirs['rsl'], build_dirs['shared'], sample_id,
                         read_num, args.min_sl_length, args.minimum_differences,
                         args.window_size, log_handle)
     logging.info("# Finished!")    
@@ -476,21 +400,22 @@ def find_polya_reads(input_reads, output_file, sample_id, read_num):
     find_sequence(input_reads, 'polya', polya_filter, polya_regex,
                   build_dirs['polya'], sample_id, read_num, 
                   args.minimum_trimmed_length, args.max_dist_from_edge, 
-                  log_handle,
-                  trimmed_side='right')
+                  log_handle)
 
 #
 # Poly(A) Step 2
 #
 @transform(find_polya_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_polya_trimmed.fastq(?P<EXT>\.gz)?'),
+           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_polya_trimmed.fastq(?P<EXT>\.[xg]z)?'),
            '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['polya'],
            '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def map_polya_reads(input_file, output_file, sample_id, read_num):
+           '{READ_NUM[0]}',
+           '{EXT[0]}')
+def map_polya_reads(input_file, output_file, sample_id, read_num, ext):
     """Maps the filtered poly-adenylated reads back to the genome"""
     log_handle = loggers[sample_id]['polya'][read_num]
-    map_reads('polya', args.target_genome, args.target_gff, build_dirs['polya'], sample_id, read_num,
+    map_reads('polya', args.target_genome, args.target_gff,
+              build_dirs['polya'], sample_id, read_num, ext,
               args.num_threads_tophat, log_handle)
 
 #
@@ -512,70 +437,6 @@ def compute_polya_coordinates(input_file, output_file, sample_id, read_num):
     logging.info("# Finished!")    
 
 #-----------------------------------------------------------------------------
-# Poly(T) Analysis
-#-----------------------------------------------------------------------------
-
-#
-# Poly(T) Step 1
-#
-@transform(filter_genomic_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_genomic_reads_removed.R?(?P<READ_NUM>[12]).fastq(?P<EXT>\.[xg]z)?'),
-           '%s/{SAMPLE_ID[0]}/fastq/{SAMPLE_ID[0]}_{READ_NUM[0]}_{READ_NUM[0]}_polyt_trimmed.fastq{EXT[0]}' % build_dirs['polyt'],
-           '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def find_polyt_reads(input_reads, output_file, sample_id, read_num):
-    """Matches reads with possible Poly(T) tail fragment"""
-    # Match reads with at least n T's at the beginning of the read; For now
-    # we will always require matches to be at the beginning of the read.
-    polyt_filter = 'T' * args.min_polya_length
-
-    polyt_regex = 'T{%d,}' % (args.min_polya_length)
-    if args.exclude_internal_polya_matches:
-        polyt_regex = '^' + polyt_regex
-
-    logging.info("# find_polyt_reads (%s %s)" % (sample_id, read_num))
-
-    log_handle = loggers[sample_id]['polyt'][read_num]
-    
-    find_sequence(input_reads, 'polyt', polyt_filter, polyt_regex,
-                  build_dirs['polyt'], sample_id, read_num, 
-                  args.minimum_trimmed_length, args.max_dist_from_edge, 
-                  log_handle,
-                  reverse=True)
-
-#
-# Poly(T) Step 2
-#
-@transform(find_polyt_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)_R?(?P<READ_NUM>[12])_[12]_polyt_trimmed.fastq(?P<EXT>\.gz)?'),
-           '%s/{SAMPLE_ID[0]}/tophat/{READ_NUM[0]}_filtered_trimmed/accepted_hits.bam' % build_dirs['polyt'],
-           '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def map_polyt_reads(input_file, output_file, sample_id, read_num):
-    """Maps the filtered Poly(T) reads back to the genome"""
-    log_handle = loggers[sample_id]['polyt'][read_num]
-    map_reads('polyt', args.target_genome, args.target_gff, build_dirs['polyt'], sample_id, read_num,
-              args.num_threads_tophat, log_handle)
-
-#
-# Poly(T) Step 3
-#
-@transform(map_polyt_reads,
-           formatter(r'^(.*)/(?P<SAMPLE_ID>.+)/tophat/R?(?P<READ_NUM>[12])_filtered_trimmed/accepted_hits.bam'),
-           '%s/{SAMPLE_ID[0]}/results/polyt_coordinates_{READ_NUM[0]}.gff' % build_dirs['polyt'],
-           '{SAMPLE_ID[0]}',
-           '{READ_NUM[0]}')
-def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
-    logging.info("# Computing coordinates for mapped polyadenylation sites "
-                 "(%s, reverse)" % sample_id)
-    log_handle = loggers[sample_id]['polyt'][read_num]
-    compute_coordinates(args.target_genome, args.target_gff, 'polyt',
-                        build_dirs['polyt'], build_dirs['shared'], sample_id,
-                        read_num, args.min_polya_length,
-                        args.minimum_differences, args.window_size, log_handle)
-    logging.info("# Finished!")    
-
-#-----------------------------------------------------------------------------
 # Step 6: Combine coordinate output for multiple samples
 #
 # Next, we create a single GFF file using the information contained in the GFF
@@ -583,9 +444,7 @@ def compute_polyt_coordinates(input_file, output_file, sample_id, read_num):
 #
 # Coordinates with low coverage may also be filtered out at this step.
 #-----------------------------------------------------------------------------
-@merge([compute_sl_coordinates,
-        compute_rsl_coordinates],
-        # formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_R?(?P<READ_NUM>[12]).gff'),
+@merge([compute_sl_coordinates],
         os.path.join(build_dirs['combined'], 'spliced_leader.gff'))
 def combine_sl_results(input_files, output_file):
     # Combine spliced leader output
@@ -597,9 +456,7 @@ def combine_sl_results(input_files, output_file):
     sl_outfile = os.path.join(build_dirs['combined'], 'spliced_leader.gff')
     output_coordinates(sl_combined, 'sl', sl_outfile, args.target_gff, track_color='83,166,156')
 
-@merge([compute_polya_coordinates,
-        compute_polyt_coordinates],
-        # formatter(r'^(.*/)/(?P<SAMPLE_ID>.*)/results/(?P<FEATURE_TYPE>[a-z]+)_coordinates_R?(?P<READ_NUM>[12]).gff'),
+@merge([compute_polya_coordinates],
         os.path.join(build_dirs['combined'], 'polya.gff'))
 def combine_polya_results(input_files, output_file):
     # Combine spliced leader output
@@ -620,9 +477,8 @@ if __name__ == "__main__":
                  logger=logging.getLogger(''),
                  multiprocess=args.num_threads)
 
-    # pipeline_run([map_sl_reads, map_rsl_reads, map_polya_reads,
-    #               map_polyt_reads,compute_polya_coordinates,
-    #               compute_polyt_coordinates],
+    # pipeline_run([map_sl_reads, map_polya_reads,
+    #               compute_polya_coordinates],
     #              logger=logging.getLogger(''),
     #              multiprocess=args.num_threads,
     #              touch_files_only=True)

@@ -141,11 +141,6 @@ def create_build_dirs(args, sample_ids):
                                 'spliced_leader',
                                 sl_dir_suffix)
 
-    # Reverse SL sub-directory
-    rsl_build_dir = os.path.join(args.build_directory,
-                                    'reverse_spliced_leader',
-                                    sl_dir_suffix)
-
     # Poly(A) tail sub-directory
     polya_dir_suffix = 'minlength%d%s_mindiff-%d' % (
             args.min_polya_length,
@@ -154,11 +149,6 @@ def create_build_dirs(args, sample_ids):
 
     polya_build_dir = os.path.join(args.build_directory,
                                     'poly-a',
-                                    polya_dir_suffix)
-
-    # Poly(A) tail reverse complement sub-directory
-    polyt_build_dir = os.path.join(args.build_directory,
-                                   'poly-t',
                                     polya_dir_suffix)
 
     # create subdirs based on matching parameters
@@ -175,8 +165,7 @@ def create_build_dirs(args, sample_ids):
                 os.makedirs(outdir, mode=0o755)
 
         # parameter- and feature-specific directories
-        for base_dir in [sl_build_dir, rsl_build_dir,
-                         polya_build_dir, polyt_build_dir]:
+        for base_dir in [sl_build_dir, polya_build_dir]:
             for sub_dir in ['fastq', 'results', 'log', 'tophat']:
                 outdir = os.path.join(base_dir, sample_id, sub_dir)
                 if not os.path.exists(outdir):
@@ -185,9 +174,7 @@ def create_build_dirs(args, sample_ids):
     return {
         'shared': shared_build_dir,
         'sl': sl_build_dir,
-        'rsl': rsl_build_dir,
         'polya': polya_build_dir,
-        'polyt': polyt_build_dir,
         'combined': combined_output_dir
     }
 
@@ -267,7 +254,7 @@ def output_coordinates(results, feature_name, filepath, target_gff, track_color=
     writer = csv.writer(fp, delimiter='\t')
 
     # Determine GFF feature type to use
-    if feature_name in ['sl', 'rsl']:
+    if feature_name == 'sl':
         feature_type = 'trans_splice_site'
     else:
         feature_type = 'polyA_site'
