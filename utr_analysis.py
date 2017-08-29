@@ -478,10 +478,11 @@ if __name__ == "__main__":
                  multiprocess=args.num_threads)
 
     # pipeline_run([map_sl_reads, map_polya_reads,
-    #               compute_polya_coordinates],
-    #              logger=logging.getLogger(''),
-    #              multiprocess=args.num_threads,
-    #              touch_files_only=True)
+    #               compute_polya_coordinates,
+    #               compute_sl_coordinates],
+    #               logger=logging.getLogger(''),
+    #               multiprocess=args.num_threads,
+    #               touch_files_only=True)
      
     # pipeline_printout_graph("utr_analysis_flowchart.png", "png",
     #                         [combine_sl_results, combine_polya_results],

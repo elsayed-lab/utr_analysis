@@ -69,7 +69,7 @@ Requirements
 
 To install these Python dependencies using pip, run:
 
-    pip install ruffus biopython bcbio-gff pysam distance
+    pip install ruffus biopython bcbio-gff pysam distance backports.lzma
 
 Usage
 -----

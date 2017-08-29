@@ -374,7 +374,7 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
     inside_cds = csv.writer(
         open('%s/inside_cds_%s.csv' % (output_dir, read_num), 'w')
     )
-    inside_cds.writerow(['read_id', 'chromosome', 'strand', 'position'])
+    inside_cds.writerow(['gene_id', 'chromosome', 'strand', 'position'])
 
     # In addition to saving the coordinates as a GFF file, we will also write a
     # CSV file which contains entries for each read used. This can be useful
@@ -444,6 +444,10 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
             pos_strand = pos_strand + 1
         else:
             neg_strand = neg_strand + 1
+
+        # temp
+        if i % 1000 == 0:
+            print("Processing read %d" % i)
 
         # Length of matched SL suffix or number of A's/T's
         untrimmed_read = untrimmed_reads[read.qname][read_num]
@@ -665,8 +669,10 @@ def compute_coordinates(target_genome, target_gff, feature_name, build_dir,
 
         # Check to make sure the acceptor site does not fall within
         # a known CDS: if it does, save to a separate file to look at later
-        if is_inside_cds(chromosomes[chromosome], acceptor_site, window_size):
-            inside_cds.writerow([read.qname, chromosome, strand, acceptor_site])
+        cds_id = is_inside_cds(chromosomes[chromosome], acceptor_site, window_size)
+
+        if cds_id != "":
+            inside_cds.writerow([cds_id, chromosome, strand, acceptor_site])
             num_filtered_inside_cds += 1
             continue
 
@@ -858,8 +864,8 @@ def is_inside_cds(chromosome, location, window_size):
 
     Return
     ------
-    bool
-        True if the feature is located in a known CDS.
+    str:
+        ID of CDS if found to be inside of one, otherwise ""
 
     References
     ----------
@@ -887,9 +893,9 @@ def is_inside_cds(chromosome, location, window_size):
     for feature in nearby.features:
         if ((feature.location.start <= relative_location) and
             (feature.location.end >= relative_location)):
-            return True
+            return feature.id
 
-    return False
+    return ""
 
 def find_closest_gene(chromosome, feature_name, location, acceptor_site_side,
                       window_size):
