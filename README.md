@@ -143,23 +143,28 @@ Each input sample file must include the pair-end read number (e.g. "_1" or
 "_R1") and a the file extension ".fastq" in all lower-case. Optionally, the
 files may be gzip-compressed with the file extension ".fastq.gz".
 
+<span style='color:red;'><strong>NOTE 2017/11/14: </strong>There is currently a
+bug in the pipeline which prevents uncompressed fastq files from being handled
+properly. To get around this issue, please gzip-compress all input reads so
+that the filenames end in ".gz"</span>
+
 For example, a valid directory structure may look like:
 
     ├── dir01
-    │   ├── rnaseq_sample01_1.fastq
-    │   └── rnaseq_sample01_2.fastq
+    │   ├── rnaseq_sample01_1.fastq.gz
+    │   └── rnaseq_sample01_2.fastq.gz
     ├── dir02
-    │   ├── rnaseq_sample02_1.fastq
-    │   └── rnaseq_sample02_2.fastq
+    │   ├── rnaseq_sample02_1.fastq.gz
+    │   └── rnaseq_sample02_2.fastq.gz
     └── etc
 
 or:
 
     ─ samples
-            ├── rnaseq_sample01_1.fastq
-            ├── rnaseq_sample01_2.fastq
-            ├── rnaseq_sample02_1.fastq
-            ├── rnaseq_sample02_2.fastq
+            ├── rnaseq_sample01_1.fastq.gz
+            ├── rnaseq_sample01_2.fastq.gz
+            ├── rnaseq_sample02_1.fastq.gz
+            ├── rnaseq_sample02_2.fastq.gz
             └── etc
 
 ### Example 1

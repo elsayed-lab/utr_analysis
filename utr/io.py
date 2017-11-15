@@ -96,10 +96,11 @@ def parse_input():
     # Parse arguments
     args = parser.parse_args()
 
-    # Replace any environmental variables and return args
-    args.target_genome = os.path.expandvars(args.target_genome)
-    args.input_reads = os.path.expandvars(args.input_reads)
-    args.target_gff = os.path.expandvars(args.target_gff)
+    # Replace any environmental variables, convert to absolute filepaths
+    # and return args
+    args.target_genome = os.path.abspath(os.path.expandvars(args.target_genome))
+    args.input_reads = os.path.abspath(os.path.expandvars(args.input_reads))
+    args.target_gff = os.path.abspath(os.path.expandvars(args.target_gff))
 
     if args.host_genome:
         args.host_genome = os.path.expandvars(args.host_genome)

@@ -57,6 +57,9 @@ build_dirs = create_build_dirs(args, sample_ids)
 # Setup global and task-specific loggers
 loggers = setup_loggers(args.build_directory, build_dirs, sample_ids)
 
+logging.info("# Checking for input RNA-Seq samples...")
+logging.info("# Found samples:\n- %s" % "\n- ".join(sample_ids))
+
 #-----------------------------------------------------------------------------
 # RUFFUS TASKS
 #
